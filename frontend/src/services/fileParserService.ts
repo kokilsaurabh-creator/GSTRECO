@@ -120,7 +120,7 @@ export const fileParserService = {
           for (const nt of ntList) {
             const ntNum = nt.ntNum || `NT-${globalCount + 1}`;
             const ntDate = nt.ntDt || new Date().toISOString().split('T')[0];
-            const ntType = nt.ntty || 'CDNR';
+            const ntType = nt.typ || nt.ntty || 'C';
             const val = parseFloat(nt.val || '0');
             let totalTax = 0, cgst = 0, sgst = 0, igst = 0;
             const items = nt.items || [];
