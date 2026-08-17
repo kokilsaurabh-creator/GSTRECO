@@ -11,14 +11,9 @@ import 'ag-grid-community/styles/ag-theme-alpine.css';
 // Register ALL community modules (filters, floating filters, clipboard, etc.)
 ModuleRegistry.registerModules([AllCommunityModule]);
 import { 
-  FileJson, 
-  FileSpreadsheet, 
   CheckCircle2,
   AlertTriangle,
   XCircle,
-  FileText,
-  FileDiff,
-  FileMinus,
   Database,
   Globe,
   Loader2,
@@ -27,99 +22,94 @@ import {
   Download,
   Maximize2,
   Minimize2,
-  Filter,
   Link2,
   Unlink,
   ShieldCheck,
-  Upload,
-  CreditCard
 } from 'lucide-react';
 
 import axios from 'axios';
 import { RecoProgressBanner } from './RecoProgressBanner';
 
-const API_BASE = 'http://localhost:8000/api/v1';
+const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api/v1';
 
-// Custom Cell Renderer for Match Status Badges
+// Custom Cell Renderer for Match Status Badges (Dark Theme)
 const MatchStatusBadgeRenderer: React.FC<any> = (props) => {
   const status = props.value as string;
   if (!status) return null;
 
   if (status === 'Ready to Claim' || status === 'Completely Matched') {
     return (
-      <span style={{ display: 'inline-flex', alignItems: 'center', padding: '2px 8px', borderRadius: '9999px', fontSize: '11px', fontWeight: 700, backgroundColor: '#dcfce7', color: '#15803d', border: '1px solid #bbf7d0' }}>
-        <CheckCircle2 style={{ width: 12, height: 12, marginRight: 4 }} />
+      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+        <CheckCircle2 className="w-3 h-3 mr-1" />
         {status}
       </span>
     );
   }
   if (status === 'Review Required' || status === 'Review') {
     return (
-      <span style={{ display: 'inline-flex', alignItems: 'center', padding: '2px 8px', borderRadius: '9999px', fontSize: '11px', fontWeight: 700, backgroundColor: '#fef3c7', color: '#b45309', border: '1px solid #fde68a' }}>
-        <AlertTriangle style={{ width: 12, height: 12, marginRight: 4 }} />
+      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/15 text-amber-400 border border-amber-500/30">
+        <AlertTriangle className="w-3 h-3 mr-1" />
         {status}
       </span>
     );
   }
   if (status.includes('Manual')) {
     return (
-      <span style={{ display: 'inline-flex', alignItems: 'center', padding: '2px 8px', borderRadius: '9999px', fontSize: '11px', fontWeight: 700, backgroundColor: '#e0e7ff', color: '#4338ca', border: '1px solid #c7d2fe' }}>
-        <ShieldCheck style={{ width: 12, height: 12, marginRight: 4 }} />
+      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-500/15 text-indigo-400 border border-indigo-500/30">
+        <ShieldCheck className="w-3 h-3 mr-1" />
         Manually Matched
       </span>
     );
   }
   return (
-    <span style={{ display: 'inline-flex', alignItems: 'center', padding: '2px 8px', borderRadius: '9999px', fontSize: '11px', fontWeight: 700, backgroundColor: '#fee2e2', color: '#dc2626', border: '1px solid #fecaca' }}>
-      <XCircle style={{ width: 12, height: 12, marginRight: 4 }} />
+    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-500/15 text-rose-400 border border-rose-500/30">
+      <XCircle className="w-3 h-3 mr-1" />
       {status}
     </span>
   );
 };
 
-export const AgGridWorkspace: React.FC = () => {
+interface AgGridWorkspaceProps {
+  quickFilterText: string;
+  globalGstinFilter: string;
+  docTab: string;
+  subTab: string;
+}
+
+export const AgGridWorkspace: React.FC<AgGridWorkspaceProps> = ({
+  quickFilterText,
+  globalGstinFilter,
+  docTab,
+  subTab,
+}) => {
   const { 
     records, 
     sapRawRecords,
     gstr2bRawRecords,
     isLoadingData,
     fetchDashboardData,
+    setRecords,
     setSelectedRowIds, 
+    setSelectedRecord,
     activeGstin, 
     returnPeriod 
   } = useAppStore();
 
   const gridRef = useRef<any>(null);
   
-  // Filtering & View Controls
-  const [quickFilterText, setQuickFilterText] = useState<string>('');
-  const [globalGstinFilter, setGlobalGstinFilter] = useState<string>('');
-  const [leftSapGstinFilter, setLeftSapGstinFilter] = useState<string>('');
-  const [rightGstGstinFilter, setRightGstGstinFilter] = useState<string>('');
-  const [pageSize, setPageSize] = useState<number>(25); // Default 25 like Screenshot 3
+  // View Controls
+  const [pageSize, setPageSize] = useState<number>(50);
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
-  const [showKpiBar, setShowKpiBar] = useState<boolean>(false); // Collapsed by default to maximize grid space
-  const [showUploadModal, setShowUploadModal] = useState<boolean>(false);
-
-  // Ingestion State
-  const [isUploading, setIsUploading] = useState(false);
-  const [uploadProgress, setUploadProgress] = useState<number>(0);
-  const [uploadStatusText, setUploadStatusText] = useState<string>('');
-  const [uploadErrorLog, setUploadErrorLog] = useState<string | null>(null);
-
-  // Document Tab: B2B | CDNR | B2BA | RAW_SAP | RAW_GSTR2B
-  const [docTab, setDocTab] = useState<'B2B' | 'CDNR' | 'B2BA' | 'RAW_SAP' | 'RAW_GSTR2B'>('B2B');
-  
-  // Sub-Tab: MATCHED | REVIEW | UNMATCHED | MANUAL
-  const [subTab, setSubTab] = useState<'MATCHED' | 'REVIEW' | 'UNMATCHED' | 'MANUAL'>('MATCHED');
-
-  const [pinnedBottomRowData, setPinnedBottomRowData] = useState<any[]>([]);
 
   // Dual-Pane Manual Match State
+  const [leftSapGstinFilter, setLeftSapGstinFilter] = useState<string>('');
+  const [rightGstGstinFilter, setRightGstGstinFilter] = useState<string>('');
   const [selectedSapRow, setSelectedSapRow] = useState<any | null>(null);
   const [selectedGstRow, setSelectedGstRow] = useState<any | null>(null);
   const [isMatching, setIsMatching] = useState<boolean>(false);
   const [matchSuccessMsg, setMatchSuccessMsg] = useState<string | null>(null);
+
+  const [pinnedBottomRowData, setPinnedBottomRowData] = useState<any[]>([]);
 
   // Toggle Fullscreen
   const toggleFullscreen = () => {
@@ -218,50 +208,6 @@ export const AgGridWorkspace: React.FC = () => {
       !r.sap_record
     );
   }, [docTab, subTab, sapRawRecords, gstr2bRawRecords, gstinFilteredRecords, globalGstinFilter]);
-
-  // Counts for document tabs & sub-tabs
-  const counts = useMemo(() => {
-    const b2b = records.filter(r => isDocTypeMatch(r, 'B2B'));
-    const cdnr = records.filter(r => isDocTypeMatch(r, 'CDNR'));
-    const b2ba = records.filter(r => isDocTypeMatch(r, 'B2BA'));
-
-    const currentDocRecords = docTab === 'CDNR' ? cdnr : docTab === 'B2BA' ? b2ba : b2b;
-
-    let totalTaxSum = 0;
-    let readyTaxSum = 0;
-    let reviewTaxSum = 0;
-    let unmatchedTaxSum = 0;
-
-    currentDocRecords.forEach(r => {
-      const tax = r.gst_record?.total_tax || r.sap_record?.total_tax || r.total_tax || 0;
-      totalTaxSum += tax;
-      if (r.match_status === 'Ready to Claim') readyTaxSum += tax;
-      else if (r.match_status === 'Review Required') reviewTaxSum += tax;
-      else unmatchedTaxSum += tax;
-    });
-
-    return {
-      b2bTotal: b2b.length,
-      cdnrTotal: cdnr.length,
-      b2baTotal: b2ba.length,
-      
-      matched: currentDocRecords.filter(r => r.match_status === 'Ready to Claim' && !r.match_level?.includes('Manual')).length,
-      review: currentDocRecords.filter(r => r.match_status === 'Review Required').length,
-      unmatched: currentDocRecords.filter(r => 
-        r.match_status === 'Unmatched' || 
-        r.match_status === 'Missing in Portal' || 
-        r.match_status === 'Missing in SAP' || 
-        !r.gst_record || 
-        !r.sap_record
-      ).length,
-      manual: currentDocRecords.filter(r => r.match_level === 'Manual Override' || r.match_level?.includes('Manual')).length,
-
-      totalTaxSum,
-      readyTaxSum,
-      reviewTaxSum,
-      unmatchedTaxSum,
-    };
-  }, [records, docTab]);
 
   // Derive Unmatched SAP Records for Left Pane
   const unmatchedSapRecords = useMemo(() => {
@@ -396,7 +342,7 @@ export const AgGridWorkspace: React.FC = () => {
       const res = await axios.post(`${API_BASE}/reconcile/manual-match`, {
         sap_id: String(sapId),
         gst_id: String(gstId)
-      });
+      }, { timeout: 2500 });
 
       const msg = res.data?.message || `Successfully matched SAP ${sapRow.invoice_num} to GSTR-2B ${gstRow.invoice_num}!`;
       setMatchSuccessMsg(msg);
@@ -405,13 +351,35 @@ export const AgGridWorkspace: React.FC = () => {
       setSelectedGstRow(null);
 
       await fetchDashboardData(activeGstin, returnPeriod);
-      setSubTab('MANUAL');
 
       setTimeout(() => setMatchSuccessMsg(null), 5000);
 
     } catch (err: any) {
-      console.error('Error in manual match:', err);
-      alert(`Manual Match Error: ${err.response?.data?.detail || err.message || 'Failed to match records'}`);
+      console.warn('Backend API offline, applying manual match in client-side demo mode:', err.message);
+      const msg = `Successfully matched SAP ${sapRow.invoice_num} to GSTR-2B ${gstRow.invoice_num} (Demo Mode)!`;
+      setMatchSuccessMsg(msg);
+
+      // Local state update
+      const updated = records.map((r) => {
+        if (r.sap_record?.id === sapRow.id || r.id === sapRow.id) {
+          return {
+            ...r,
+            match_status: 'Ready to Claim',
+            match_level: 'Level 2: Manually Accepted',
+            gst_record: gstRow,
+            supplier_name: gstRow.supplier_name,
+            portal_invoice_num: gstRow.invoice_num,
+            portal_invoice_date: gstRow.invoice_date,
+            portal_total_tax: gstRow.total_tax
+          };
+        }
+        return r;
+      });
+      setRecords(updated);
+      setSelectedSapRow(null);
+      setSelectedGstRow(null);
+
+      setTimeout(() => setMatchSuccessMsg(null), 5000);
     } finally {
       setIsMatching(false);
     }
@@ -423,13 +391,21 @@ export const AgGridWorkspace: React.FC = () => {
     if (!confirm('Are you sure you want to unlink and undo this match?')) return;
 
     try {
-      const res = await axios.post(`${API_BASE}/reconcile/unlink-match`, { match_id: String(matchId) });
+      const res = await axios.post(`${API_BASE}/reconcile/unlink-match`, { match_id: String(matchId) }, { timeout: 2500 });
       setMatchSuccessMsg(res.data?.message || 'Record unlinked successfully!');
       await fetchDashboardData(activeGstin, returnPeriod);
       setTimeout(() => setMatchSuccessMsg(null), 4000);
     } catch (err: any) {
-      console.error('Error unlinking record:', err);
-      alert(`Unlink Error: ${err.response?.data?.detail || err.message || 'Failed to unlink record'}`);
+      console.warn('Backend API offline, unlinking in client-side demo mode:', err.message);
+      const updated = records.map((r) => {
+        if (r.id === matchId || r.match_id === matchId) {
+          return { ...r, match_status: 'Unmatched', match_level: 'Unmatched', gst_record: null, portal_invoice_num: '-' };
+        }
+        return r;
+      });
+      setRecords(updated);
+      setMatchSuccessMsg('Record unlinked successfully (Demo Mode)!');
+      setTimeout(() => setMatchSuccessMsg(null), 4000);
     }
   };
 
@@ -439,8 +415,43 @@ export const AgGridWorkspace: React.FC = () => {
       gridRef.current.api.exportDataAsCsv({
         fileName: `GST_Reco_${docTab}_${subTab}_${activeGstin}_${returnPeriod}.csv`
       });
+    } else {
+      // Fallback manual CSV export for dual pane view (Unmatched Tab)
+      const headers = [
+        'ID', 'SAP Vendor Name', 'SAP GSTIN', 'SAP Invoice Num', 'SAP Invoice Date', 'SAP Tax (INR)',
+        'Match Level', 'Match Status',
+        'Portal Supplier Name', 'Portal GSTIN', 'Portal Invoice Num', 'Portal Invoice Date', 'Portal Tax (INR)'
+      ];
+
+      const csvRows = [
+        headers.join(','),
+        ...gridRowData.map((r: any) => [
+          `"${r.id}"`,
+          `"${r.sap_record ? r.sap_record.vendor_name : '-'}"`,
+          `"${r.sap_record ? r.sap_record.vendor_gstin : '-'}"`,
+          `"${r.sap_record ? r.sap_record.invoice_num : '-'}"`,
+          `"${r.sap_record ? r.sap_record.invoice_date : '-'}"`,
+          r.sap_record ? r.sap_record.total_tax : 0,
+          `"${r.match_level}"`,
+          `"${r.match_status}"`,
+          `"${r.gst_record ? r.gst_record.supplier_name : '-'}"`,
+          `"${r.gst_record ? r.gst_record.supplier_gstin : '-'}"`,
+          `"${r.gst_record ? r.gst_record.invoice_num : '-'}"`,
+          `"${r.gst_record ? r.gst_record.invoice_date : '-'}"`,
+          r.gst_record ? r.gst_record.total_tax : 0
+        ].join(','))
+      ];
+
+      const blob = new Blob([csvRows.join('\n')], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', `GST_Reco_${docTab}_${subTab}_${activeGstin}_${returnPeriod}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
     }
-  }, [docTab, subTab, activeGstin, returnPeriod]);
+  }, [docTab, subTab, activeGstin, returnPeriod, gridRowData]);
 
   // Smart Candidate Suggestion Renderer for Right (GSTR-2B) Pane
   const CandidateMatchCellRenderer = (props: any) => {
@@ -458,8 +469,8 @@ export const AgGridWorkspace: React.FC = () => {
     const confidence = sameGstin && taxDiff <= 1.0 ? '98%' : sameGstin ? '90%' : '85%';
 
     return (
-      <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-        <span style={{ fontSize: '10px', fontWeight: 700, padding: '1px 6px', borderRadius: 4, backgroundColor: '#dcfce7', color: '#15803d', border: '1px solid #bbf7d0' }}>
+      <div className="flex items-center gap-1">
+        <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
           {confidence}
         </span>
         <button
@@ -467,7 +478,7 @@ export const AgGridWorkspace: React.FC = () => {
             e.stopPropagation();
             handleForceManualMatch(selectedSapRow, gstRow);
           }}
-          style={{ fontSize: '10px', fontWeight: 700, padding: '1px 6px', borderRadius: 4, backgroundColor: '#2563eb', color: 'white', border: 'none', cursor: 'pointer' }}
+          className="text-[9px] font-bold px-1.5 py-0.5 rounded gradient-primary text-white border-none cursor-pointer"
         >
           Match
         </button>
@@ -485,10 +496,10 @@ export const AgGridWorkspace: React.FC = () => {
     return (
       <button
         onClick={() => handleUnlinkMatch(matchId)}
-        style={{ padding: '2px 8px', borderRadius: 6, backgroundColor: '#fee2e2', color: '#dc2626', fontWeight: 700, fontSize: '11px', border: '1px solid #fecaca', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4 }}
+        className="px-2 py-0.5 rounded-lg bg-rose-500/15 text-rose-400 font-bold text-[10px] border border-rose-500/30 cursor-pointer flex items-center gap-1 hover:bg-rose-500/25 transition-colors"
         title="Unlink and return to Unmatched pool"
       >
-        <Unlink style={{ width: 12, height: 12 }} />
+        <Unlink className="w-3 h-3" />
         <span>Unlink</span>
       </button>
     );
@@ -497,10 +508,10 @@ export const AgGridWorkspace: React.FC = () => {
   // Column definitions for Left (SAP) Unmatched Pane
   const unmatchedSapColumnDefs = useMemo<ColDef[]>(() => [
     { headerName: 'SAP Vendor Name', field: 'vendor_name', flex: 1, minWidth: 160, filter: 'agTextColumnFilter', floatingFilter: true },
-    { headerName: 'Vendor GSTIN', field: 'vendor_gstin', width: 155, filter: 'agTextColumnFilter', floatingFilter: true, cellStyle: { fontFamily: 'monospace', fontSize: '11px' } as any },
-    { headerName: 'Invoice Num', field: 'invoice_num', width: 135, filter: 'agTextColumnFilter', floatingFilter: true, cellStyle: { fontFamily: 'monospace', fontSize: '11px', fontWeight: 600 } as any },
+    { headerName: 'Vendor GSTIN', field: 'vendor_gstin', width: 155, filter: 'agTextColumnFilter', floatingFilter: true },
+    { headerName: 'Invoice Num', field: 'invoice_num', width: 135, filter: 'agTextColumnFilter', floatingFilter: true, cellStyle: { fontWeight: 600 } as any },
     { headerName: 'Invoice Date', field: 'invoice_date', width: 115, valueFormatter: (p) => formatDate(p.value), filter: 'agDateColumnFilter', floatingFilter: true },
-    { headerName: 'Total Tax', field: 'total_tax', width: 125, cellStyle: { textAlign: 'right', fontWeight: 700, color: '#16a34a' } as any, valueFormatter: (p) => formatINR(p.value), filter: 'agNumberColumnFilter', floatingFilter: true },
+    { headerName: 'Total Tax', field: 'total_tax', width: 125, cellStyle: { textAlign: 'right', fontWeight: 700, color: '#60a5fa' } as any, valueFormatter: (p) => formatINR(p.value), filter: 'agNumberColumnFilter', floatingFilter: true },
   ], []);
 
   // Column definitions for Right (GSTR-2B) Unmatched Pane
@@ -514,10 +525,10 @@ export const AgGridWorkspace: React.FC = () => {
       pinned: 'left',
     },
     { headerName: 'Supplier Name', field: 'supplier_name', flex: 1, minWidth: 160, filter: 'agTextColumnFilter', floatingFilter: true },
-    { headerName: 'Supplier GSTIN', field: 'supplier_gstin', width: 155, filter: 'agTextColumnFilter', floatingFilter: true, cellStyle: { fontFamily: 'monospace', fontSize: '11px' } as any },
-    { headerName: 'Portal Inv Num', field: 'invoice_num', width: 135, filter: 'agTextColumnFilter', floatingFilter: true, cellStyle: { fontFamily: 'monospace', fontSize: '11px', fontWeight: 600 } as any },
+    { headerName: 'Supplier GSTIN', field: 'supplier_gstin', width: 155, filter: 'agTextColumnFilter', floatingFilter: true },
+    { headerName: 'Portal Inv Num', field: 'invoice_num', width: 135, filter: 'agTextColumnFilter', floatingFilter: true, cellStyle: { fontWeight: 600 } as any },
     { headerName: 'Invoice Date', field: 'invoice_date', width: 115, valueFormatter: (p) => formatDate(p.value), filter: 'agDateColumnFilter', floatingFilter: true },
-    { headerName: 'Portal Tax', field: 'total_tax', width: 125, cellStyle: { textAlign: 'right', fontWeight: 700, color: '#2563eb' } as any, valueFormatter: (p) => formatINR(p.value), filter: 'agNumberColumnFilter', floatingFilter: true },
+    { headerName: 'Portal Tax', field: 'total_tax', width: 125, cellStyle: { textAlign: 'right', fontWeight: 700, color: '#34d399' } as any, valueFormatter: (p) => formatINR(p.value), filter: 'agNumberColumnFilter', floatingFilter: true },
   ], [selectedSapRow]);
 
   // Dynamic Footer Aggregation
@@ -541,14 +552,14 @@ export const AgGridWorkspace: React.FC = () => {
     setPinnedBottomRowData([
       {
         id: 'footer-sum-row',
-        vendor_name: `TOTAL Exposure (${count} ${count === 1 ? 'Record' : 'Records'})`,
-        invoice_num: 'FINANCIAL SUM',
+        vendor_name: `TOTAL (${count} Records)`,
+        invoice_num: '—',
         invoice_date: '-',
         total_tax: totalTaxSum,
         match_level: 'Screen Total',
         match_status: '',
-        supplier_name: 'Filtered Portal Total Exposure',
-        portal_invoice_num: 'FINANCIAL SUM',
+        supplier_name: 'Portal Total',
+        portal_invoice_num: '—',
         portal_invoice_date: '-',
         portal_total_tax: portalTaxSum,
       }
@@ -559,101 +570,31 @@ export const AgGridWorkspace: React.FC = () => {
   const onGridReady = useCallback((params: any) => updatePinnedBottomRow(params.api), [updatePinnedBottomRow]);
   const onModelUpdated = useCallback((params: any) => updatePinnedBottomRow(params.api), [updatePinnedBottomRow]);
 
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>, type: 'gstr2b' | 'sap') => {
-    if (!e.target.files || e.target.files.length === 0) return;
-    const selectedFiles = Array.from(e.target.files);
-
-    setIsUploading(true);
-    setUploadErrorLog(null);
-    setUploadProgress(15);
-    setUploadStatusText(`Uploading ${selectedFiles.length} file(s)...`);
-
-    const formData = new FormData();
-    formData.append('active_gstin', activeGstin);
-    formData.append('gstin', activeGstin);
-
-    if (type === 'gstr2b') {
-      selectedFiles.forEach((file) => formData.append('files', file));
-      formData.append('file', selectedFiles[0]);
-    } else {
-      formData.append('file', selectedFiles[0]);
-      formData.append('return_period', returnPeriod);
-    }
-
-    try {
-      setUploadProgress(45);
-      setUploadStatusText(`Parsing & ingesting ${type === 'gstr2b' ? 'GSTR-2B JSON' : 'SAP MM Register'}...`);
-
-      const endpoint = type === 'gstr2b' ? `${API_BASE}/ingest/gstr2b-json` : `${API_BASE}/ingestion/sap-mm`;
-      const res = await axios.post(endpoint, formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-        onUploadProgress: (progressEvent: any) => {
-          if (progressEvent.total) {
-            const percent = Math.round((progressEvent.loaded * 60) / progressEvent.total);
-            setUploadProgress(Math.min(90, 20 + percent));
-          }
-        }
-      });
-
-      setUploadProgress(100);
-      let msg = res.data?.message;
-      if (type === 'gstr2b' && res.data?.files_processed) {
-        msg = `Successfully ingested ${res.data.total_records_parsed} records from ${res.data.files_processed} GSTR-2B file(s)!`;
-      }
-      setUploadStatusText(msg || `${type === 'gstr2b' ? 'GSTR-2B JSON' : 'SAP Excel'} ingested successfully!`);
-
-      await fetchDashboardData(activeGstin, returnPeriod);
-
-      setTimeout(() => {
-        setIsUploading(false);
-        setUploadProgress(0);
-        setUploadStatusText('');
-        setShowUploadModal(false);
-      }, 1500);
-
-    } catch (err: any) {
-      console.error('File Upload Error:', err);
-      setUploadProgress(0);
-      setUploadStatusText('Ingestion Error Occurred');
-
-      const detailMsg = err.response?.data?.detail;
-      const fullLog = `[ERROR TIMESTAMP: ${new Date().toISOString()}]
-[TARGET GSTIN: ${activeGstin}]
-[RETURN PERIOD: ${returnPeriod}]
-[FILE TYPE: ${type === 'gstr2b' ? 'GSTR-2B JSON' : 'SAP MM Excel'}]
-
-------------------- SERVER ERROR DETAILS / STACK TRACE -------------------
-${typeof detailMsg === 'object' ? JSON.stringify(detailMsg, null, 2) : (detailMsg || err.message || 'Unknown processing error')}
-`;
-      setUploadErrorLog(fullLog);
-    } finally {
-      e.target.value = '';
-    }
-  };
-
   const onSelectionChanged = useCallback((event: any) => {
     const selectedRows = event.api.getSelectedRows() as RecoRecord[];
     setSelectedRowIds(selectedRows.map(r => r.id));
   }, [setSelectedRowIds]);
 
+  // Row click -> open discrepancy panel for review records
+  const onRowClicked = useCallback((event: any) => {
+    const data = event.data as RecoRecord;
+    if (!data || data.id === 'footer-sum-row') return;
+    if (docTab === 'RAW_SAP' || docTab === 'RAW_GSTR2B') return;
+    
+    // Open discrepancy panel for Review Required or any matched record
+    if (data.match_status === 'Review Required' || data.sap_record || data.gst_record) {
+      setSelectedRecord(data);
+    }
+  }, [docTab, setSelectedRecord]);
+
   const getRowStyle = useCallback((params: any): RowStyle | undefined => {
     if (params.node.rowPinned) {
       return { 
-        background: '#f1f5f9', 
+        background: '#111827', 
         fontWeight: 'bold', 
         borderTop: '2px solid #3b82f6',
-        color: '#1e293b' 
+        color: '#e2e8f0' 
       };
-    }
-    const status = params.data?.match_status;
-    if (status === 'Ready to Claim' || status === 'Completely Matched') {
-      return { background: '#f0fdf4' };
-    }
-    if (status === 'Review Required' || status === 'Review') {
-      return { background: '#fffbeb' };
-    }
-    if (status === 'Unmatched' || status === 'Missing in Portal' || status === 'Missing in SAP') {
-      return { background: '#fef2f2' };
     }
     return undefined;
   }, []);
@@ -665,7 +606,7 @@ ${typeof detailMsg === 'object' ? JSON.stringify(detailMsg, null, 2) : (detailMs
       valueGetter: (p: any) => p.node.rowPinned ? '' : (p.node.rowIndex + 1),
       width: 50,
       pinned: 'left',
-      cellStyle: { textAlign: 'center', fontFamily: 'monospace', fontSize: '11px', color: '#94a3b8' },
+      cellStyle: { textAlign: 'center', fontSize: '11px', color: '#64748b' },
       sortable: false,
       filter: false,
       resizable: false,
@@ -689,7 +630,7 @@ ${typeof detailMsg === 'object' ? JSON.stringify(detailMsg, null, 2) : (detailMs
           filter: 'agTextColumnFilter',
           sortable: true,
           floatingFilter: true,
-          cellStyle: { fontFamily: 'monospace', fontSize: '11px', color: '#1e40af' },
+          cellStyle: { color: '#60a5fa' },
         },
         {
           headerName: 'Invoice Num',
@@ -698,7 +639,7 @@ ${typeof detailMsg === 'object' ? JSON.stringify(detailMsg, null, 2) : (detailMs
           filter: 'agTextColumnFilter',
           sortable: true,
           floatingFilter: true,
-          cellStyle: { fontFamily: 'monospace', fontSize: '11px', fontWeight: 700, color: '#2563eb' },
+          cellStyle: { fontWeight: 700, color: '#60a5fa' },
         },
         {
           headerName: 'Invoice Date',
@@ -716,7 +657,7 @@ ${typeof detailMsg === 'object' ? JSON.stringify(detailMsg, null, 2) : (detailMs
           sortable: true,
           filter: 'agNumberColumnFilter',
           floatingFilter: true,
-          cellStyle: { fontWeight: 700, textAlign: 'right', color: '#16a34a' },
+          cellStyle: { fontWeight: 700, textAlign: 'right', color: '#60a5fa' },
           valueFormatter: (p) => p.value != null ? `₹${p.value.toLocaleString('en-IN', {minimumFractionDigits: 2})}` : '-'
         },
       ],
@@ -738,7 +679,7 @@ ${typeof detailMsg === 'object' ? JSON.stringify(detailMsg, null, 2) : (detailMs
           headerName: 'Match Status',
           valueGetter: (p: any) => p.data?.match_status || '-',
           width: 160,
-          filter: 'agSetColumnFilter',
+          filter: 'agTextColumnFilter',
           sortable: true,
           floatingFilter: true,
           cellRenderer: MatchStatusBadgeRenderer,
@@ -764,7 +705,7 @@ ${typeof detailMsg === 'object' ? JSON.stringify(detailMsg, null, 2) : (detailMs
           filter: 'agTextColumnFilter',
           sortable: true,
           floatingFilter: true,
-          cellStyle: { fontFamily: 'monospace', fontSize: '11px', color: '#059669' },
+          cellStyle: { color: '#34d399' },
         },
         {
           headerName: 'Portal Inv Num',
@@ -773,7 +714,7 @@ ${typeof detailMsg === 'object' ? JSON.stringify(detailMsg, null, 2) : (detailMs
           filter: 'agTextColumnFilter',
           sortable: true,
           floatingFilter: true,
-          cellStyle: { fontFamily: 'monospace', fontSize: '11px', fontWeight: 700, color: '#059669' },
+          cellStyle: { fontWeight: 700, color: '#34d399' },
         },
         {
           headerName: 'Portal Date',
@@ -791,14 +732,14 @@ ${typeof detailMsg === 'object' ? JSON.stringify(detailMsg, null, 2) : (detailMs
           sortable: true,
           filter: 'agNumberColumnFilter',
           floatingFilter: true,
-          cellStyle: { fontWeight: 700, textAlign: 'right', color: '#2563eb' },
+          cellStyle: { fontWeight: 700, textAlign: 'right', color: '#34d399' },
           valueFormatter: (p) => p.value != null ? `₹${p.value.toLocaleString('en-IN', {minimumFractionDigits: 2})}` : '-'
         },
       ],
     },
     {
       headerName: 'Actions',
-      width: 140,
+      width: 100,
       pinned: 'right',
       cellRenderer: UnlinkActionCellRenderer,
       sortable: false,
@@ -809,34 +750,44 @@ ${typeof detailMsg === 'object' ? JSON.stringify(detailMsg, null, 2) : (detailMs
 
   // Raw SAP Register Single-Source Flat Columns
   const rawSapColumnDefs = useMemo<ColDef[]>(() => [
-    { headerName: '#', valueGetter: (p: any) => p.node.rowIndex + 1, width: 55, pinned: 'left', cellClass: 'text-center font-mono text-xs text-muted-foreground' },
+    { headerName: '#', valueGetter: (p: any) => p.node.rowIndex + 1, width: 55, pinned: 'left', cellStyle: { textAlign: 'center', fontSize: '11px', color: '#64748b' } as any },
     { headerName: 'SAP Vendor Name', field: 'vendor_name', width: 220, filter: 'agTextColumnFilter', floatingFilter: true },
-    { headerName: 'Vendor GSTIN', field: 'vendor_gstin', width: 170, cellClass: 'font-mono text-xs font-semibold text-blue-300', filter: 'agTextColumnFilter', floatingFilter: true },
-    { headerName: 'SAP Doc No', field: 'sap_doc_no', width: 140, cellClass: 'font-mono text-xs text-blue-400', filter: 'agTextColumnFilter', floatingFilter: true },
-    { headerName: 'Document Number', field: 'document_number', width: 170, cellClass: 'font-mono text-xs font-bold text-blue-400', filter: 'agTextColumnFilter', floatingFilter: true },
+    { headerName: 'Vendor GSTIN', field: 'vendor_gstin', width: 170, cellStyle: { color: '#60a5fa' } as any, filter: 'agTextColumnFilter', floatingFilter: true },
+    { headerName: 'SAP Doc No', field: 'sap_doc_no', width: 140, cellStyle: { color: '#60a5fa' } as any, filter: 'agTextColumnFilter', floatingFilter: true },
+    { headerName: 'Document Number', field: 'document_number', width: 170, cellStyle: { fontWeight: 700, color: '#60a5fa' } as any, filter: 'agTextColumnFilter', floatingFilter: true },
     { headerName: 'Document Date', field: 'document_date', width: 140, valueFormatter: (p) => formatDate(p.value), filter: 'agDateColumnFilter', floatingFilter: true },
-    { headerName: 'Taxable Base', field: 'taxable_value', width: 150, cellClass: 'text-right font-semibold', valueFormatter: (p) => formatINR(p.value), filter: 'agNumberColumnFilter', floatingFilter: true },
-    { headerName: 'CGST', field: 'cgst', width: 130, cellClass: 'text-right', valueFormatter: (p) => formatINR(p.value) },
-    { headerName: 'SGST', field: 'sgst', width: 130, cellClass: 'text-right', valueFormatter: (p) => formatINR(p.value) },
-    { headerName: 'IGST', field: 'igst', width: 130, cellClass: 'text-right', valueFormatter: (p) => formatINR(p.value) },
-    { headerName: 'Total Tax', field: 'total_tax', width: 150, cellClass: 'text-right font-bold text-emerald-400', valueFormatter: (p) => formatINR(p.value), filter: 'agNumberColumnFilter', floatingFilter: true },
-    { headerName: 'Total Value', field: 'total_value', width: 160, cellClass: 'text-right font-bold', valueFormatter: (p) => formatINR(p.value), filter: 'agNumberColumnFilter', floatingFilter: true },
+    { headerName: 'Taxable Base', field: 'taxable_value', width: 150, cellStyle: { textAlign: 'right', fontWeight: 600 } as any, valueFormatter: (p) => formatINR(p.value), filter: 'agNumberColumnFilter', floatingFilter: true },
+    { headerName: 'CGST', field: 'cgst', width: 120, cellStyle: { textAlign: 'right' } as any, valueFormatter: (p) => formatINR(p.value) },
+    { headerName: 'SGST', field: 'sgst', width: 120, cellStyle: { textAlign: 'right' } as any, valueFormatter: (p) => formatINR(p.value) },
+    { headerName: 'IGST', field: 'igst', width: 120, cellStyle: { textAlign: 'right' } as any, valueFormatter: (p) => formatINR(p.value) },
+    { headerName: 'Total Tax', field: 'total_tax', width: 150, cellStyle: { textAlign: 'right', fontWeight: 700, color: '#34d399' } as any, valueFormatter: (p) => formatINR(p.value), filter: 'agNumberColumnFilter', floatingFilter: true },
+    { headerName: 'Total Value', field: 'total_value', width: 160, cellStyle: { textAlign: 'right', fontWeight: 700 } as any, valueFormatter: (p) => formatINR(p.value), filter: 'agNumberColumnFilter', floatingFilter: true },
+    { headerName: 'Reco Status', field: 'reconciliation_status', width: 140, filter: 'agTextColumnFilter', floatingFilter: true },
+    { headerName: 'Match Level', field: 'match_level', width: 160, filter: 'agTextColumnFilter', floatingFilter: true },
+    { headerName: 'Matched Portal Inv', field: 'matched_gstr_invoice_number', width: 170, cellStyle: { color: '#34d399' } as any, filter: 'agTextColumnFilter', floatingFilter: true },
+    { headerName: 'Matched Portal Supplier', field: 'matched_gstr_supplier_name', width: 180, filter: 'agTextColumnFilter', floatingFilter: true },
+    { headerName: 'Matched Portal Tax', field: 'matched_gstr_total_tax', width: 150, cellStyle: { textAlign: 'right', color: '#34d399' } as any, valueFormatter: (p) => p.value != null ? formatINR(p.value) : '-', filter: 'agNumberColumnFilter', floatingFilter: true },
   ], []);
 
   // Raw GSTR-2B Portal Single-Source Flat Columns
   const rawGstr2bColumnDefs = useMemo<ColDef[]>(() => [
-    { headerName: '#', valueGetter: (p: any) => p.node.rowIndex + 1, width: 55, pinned: 'left', cellClass: 'text-center font-mono text-xs text-muted-foreground' },
+    { headerName: '#', valueGetter: (p: any) => p.node.rowIndex + 1, width: 55, pinned: 'left', cellStyle: { textAlign: 'center', fontSize: '11px', color: '#64748b' } as any },
     { headerName: 'Supplier Name', field: 'supplier_name', width: 220, filter: 'agTextColumnFilter', floatingFilter: true },
-    { headerName: 'Supplier GSTIN', field: 'supplier_gstin', width: 170, cellClass: 'font-mono text-xs font-semibold text-emerald-300', filter: 'agTextColumnFilter', floatingFilter: true },
-    { headerName: 'Invoice Number', field: 'invoice_number', width: 170, cellClass: 'font-mono text-xs font-bold text-emerald-400', filter: 'agTextColumnFilter', floatingFilter: true },
+    { headerName: 'Supplier GSTIN', field: 'supplier_gstin', width: 170, cellStyle: { color: '#34d399' } as any, filter: 'agTextColumnFilter', floatingFilter: true },
+    { headerName: 'Invoice Number', field: 'invoice_number', width: 170, cellStyle: { fontWeight: 700, color: '#34d399' } as any, filter: 'agTextColumnFilter', floatingFilter: true },
     { headerName: 'Invoice Date', field: 'invoice_date', width: 140, valueFormatter: (p) => formatDate(p.value), filter: 'agDateColumnFilter', floatingFilter: true },
-    { headerName: 'Type', field: 'invoice_type', width: 110, cellClass: 'font-bold text-center', filter: 'agTextColumnFilter' },
-    { headerName: 'Taxable Value', field: 'taxable_value', width: 150, cellClass: 'text-right font-semibold', valueFormatter: (p) => formatINR(p.value), filter: 'agNumberColumnFilter', floatingFilter: true },
-    { headerName: 'CGST', field: 'cgst', width: 130, cellClass: 'text-right', valueFormatter: (p) => formatINR(p.value) },
-    { headerName: 'SGST', field: 'sgst', width: 130, cellClass: 'text-right', valueFormatter: (p) => formatINR(p.value) },
-    { headerName: 'IGST', field: 'igst', width: 130, cellClass: 'text-right', valueFormatter: (p) => formatINR(p.value) },
-    { headerName: 'Total Tax', field: 'total_tax', width: 150, cellClass: 'text-right font-bold text-blue-400', valueFormatter: (p) => formatINR(p.value), filter: 'agNumberColumnFilter', floatingFilter: true },
-    { headerName: 'Total Value', field: 'total_value', width: 160, cellClass: 'text-right font-bold', valueFormatter: (p) => formatINR(p.value), filter: 'agNumberColumnFilter', floatingFilter: true },
+    { headerName: 'Type', field: 'invoice_type', width: 110, cellStyle: { fontWeight: 700, textAlign: 'center' } as any, filter: 'agTextColumnFilter' },
+    { headerName: 'Taxable Value', field: 'taxable_value', width: 150, cellStyle: { textAlign: 'right', fontWeight: 600 } as any, valueFormatter: (p) => formatINR(p.value), filter: 'agNumberColumnFilter', floatingFilter: true },
+    { headerName: 'CGST', field: 'cgst', width: 120, cellStyle: { textAlign: 'right' } as any, valueFormatter: (p) => formatINR(p.value) },
+    { headerName: 'SGST', field: 'sgst', width: 120, cellStyle: { textAlign: 'right' } as any, valueFormatter: (p) => formatINR(p.value) },
+    { headerName: 'IGST', field: 'igst', width: 120, cellStyle: { textAlign: 'right' } as any, valueFormatter: (p) => formatINR(p.value) },
+    { headerName: 'Total Tax', field: 'total_tax', width: 150, cellStyle: { textAlign: 'right', fontWeight: 700, color: '#60a5fa' } as any, valueFormatter: (p) => formatINR(p.value), filter: 'agNumberColumnFilter', floatingFilter: true },
+    { headerName: 'Total Value', field: 'total_value', width: 160, cellStyle: { textAlign: 'right', fontWeight: 700 } as any, valueFormatter: (p) => formatINR(p.value), filter: 'agNumberColumnFilter', floatingFilter: true },
+    { headerName: 'Reco Status', field: 'reconciliation_status', width: 140, filter: 'agTextColumnFilter', floatingFilter: true },
+    { headerName: 'Match Level', field: 'match_level', width: 160, filter: 'agTextColumnFilter', floatingFilter: true },
+    { headerName: 'Matched SAP Doc', field: 'matched_sap_document_number', width: 170, cellStyle: { color: '#60a5fa' } as any, filter: 'agTextColumnFilter', floatingFilter: true },
+    { headerName: 'Matched SAP Vendor', field: 'matched_sap_vendor_name', width: 180, filter: 'agTextColumnFilter', floatingFilter: true },
+    { headerName: 'Matched SAP Tax', field: 'matched_sap_total_tax', width: 150, cellStyle: { textAlign: 'right', color: '#60a5fa' } as any, valueFormatter: (p) => p.value != null ? formatINR(p.value) : '-', filter: 'agNumberColumnFilter', floatingFilter: true },
   ], []);
 
   const activeColumnDefs = useMemo(() => {
@@ -854,548 +805,231 @@ ${typeof detailMsg === 'object' ? JSON.stringify(detailMsg, null, 2) : (detailMs
   }, []);
 
   return (
-    <div className={`flex-1 flex flex-col space-y-2 relative ${isFullscreen ? 'fixed inset-0 z-50 bg-white p-3 w-screen h-screen overflow-hidden' : ''}`}>
+    <div className={`flex-1 flex flex-col relative ${isFullscreen ? 'fixed inset-0 z-50 bg-background p-3 w-screen h-screen overflow-hidden' : ''}`}>
       
       {!isFullscreen && <RecoProgressBanner />}
 
-      {/* File Upload Modal (Triggered by Toolbar Button) */}
-      {showUploadModal && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="bg-card border border-border rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden flex flex-col p-6 space-y-4">
-            
-            <div className="flex items-center justify-between border-b border-border pb-3">
-              <div className="flex items-center space-x-2.5">
-                <Upload className="w-5 h-5 text-primary" />
-                <h3 className="font-bold text-foreground text-sm">Upload GST & Purchase Register Datasets</h3>
-              </div>
-              <button onClick={() => setShowUploadModal(false)} className="p-1 rounded-lg hover:bg-muted text-foreground/60">
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {/* Government Data Card */}
-              <div className="bg-background border border-border p-5 rounded-2xl flex flex-col items-center justify-center border-dashed relative overflow-hidden group hover:border-primary/60 transition-all text-center">
-                <input 
-                  type="file" 
-                  accept=".json" 
-                  multiple
-                  onChange={(e) => handleFileUpload(e, 'gstr2b')}
-                  className="absolute inset-0 opacity-0 cursor-pointer z-20"
-                  disabled={isUploading || isLoadingData}
-                />
-                <FileJson className="w-8 h-8 text-primary mb-2 group-hover:scale-110 transition-transform" />
-                <h4 className="font-bold text-foreground text-xs">Government GSTR-2B JSON</h4>
-                <p className="text-[11px] text-foreground/60 mt-1">Upload GSTR-2B JSON (B2B, CDNR, B2BA, IMPG)</p>
-              </div>
-
-              {/* SAP MM Data Card */}
-              <div className="bg-background border border-border p-5 rounded-2xl flex flex-col items-center justify-center border-dashed relative overflow-hidden group hover:border-emerald-500/60 transition-all text-center">
-                <input 
-                  type="file" 
-                  accept=".xlsx,.xls,.csv" 
-                  onChange={(e) => handleFileUpload(e, 'sap')}
-                  className="absolute inset-0 opacity-0 cursor-pointer z-20"
-                  disabled={isUploading || isLoadingData}
-                />
-                <FileSpreadsheet className="w-8 h-8 text-emerald-400 mb-2 group-hover:scale-110 transition-transform" />
-                <h4 className="font-bold text-foreground text-xs">SAP MM Purchase Register</h4>
-                <p className="text-[11px] text-foreground/60 mt-1">Upload Purchase Register (Excel / CSV)</p>
-              </div>
-            </div>
-
-            {isUploading && (
-              <div className="space-y-2 py-2">
-                <div className="flex justify-between text-xs font-semibold text-foreground/70">
-                  <span>{uploadStatusText || 'Uploading...'}</span>
-                  <span className="text-primary font-bold">{uploadProgress}%</span>
-                </div>
-                <div className="w-full h-2.5 bg-muted rounded-full overflow-hidden p-0.5 border border-border">
-                  <div className="h-full bg-primary rounded-full transition-all duration-300" style={{ width: `${uploadProgress}%` }} />
-                </div>
-              </div>
-            )}
-
-            {uploadErrorLog && (
-              <pre className="bg-[#080a0e] text-rose-300 font-mono text-xs p-3 rounded-xl max-h-48 overflow-y-auto border border-border whitespace-pre-wrap select-all">
-                {uploadErrorLog}
-              </pre>
-            )}
-
+      {/* Toolbar Strip */}
+      <div className="flex items-center justify-between px-4 py-2 bg-card border-b border-border/60 shrink-0">
+        <div className="flex items-center space-x-2 text-[11px] text-muted-foreground font-semibold">
+          <span className="font-financial text-foreground">{gridRowData.length}</span>
+          <span>records</span>
+          {docTab !== 'RAW_SAP' && docTab !== 'RAW_GSTR2B' && (
+            <>
+              <span className="text-border">•</span>
+              <span className="text-primary font-bold">{subTab}</span>
+            </>
+          )}
+        </div>
+        <div className="flex items-center space-x-2">
+          <div className="flex items-center space-x-1.5 text-[11px] text-muted-foreground bg-surface px-2.5 py-1 rounded-lg border border-border/60">
+            <span>Rows:</span>
+            <select value={pageSize} onChange={(e) => setPageSize(Number(e.target.value))}
+              className="bg-transparent text-xs font-bold text-primary focus:outline-none cursor-pointer">
+              <option value={25}>25</option>
+              <option value={50}>50</option>
+              <option value={100}>100</option>
+              <option value={250}>250</option>
+              <option value={0}>All</option>
+            </select>
           </div>
+          <button onClick={handleExportCsv}
+            className="px-3 py-1.5 rounded-lg gradient-success text-white font-bold text-[11px] flex items-center space-x-1.5 transition-all active:scale-[0.97]">
+            <Download className="w-3.5 h-3.5" />
+            <span>Export CSV</span>
+          </button>
+          <button onClick={toggleFullscreen}
+            className={`p-1.5 rounded-lg border text-xs transition-all ${
+              isFullscreen ? 'bg-rose-500/15 border-rose-500/30 text-rose-400' : 'bg-surface border-border/60 text-muted-foreground hover:text-primary'
+            }`}>
+            {isFullscreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
+          </button>
+        </div>
+      </div>
+
+      {/* Loading Overlay */}
+      {isLoadingData && (
+        <div className="absolute inset-0 z-30 bg-background/80 backdrop-blur-sm flex flex-col items-center justify-center space-y-3">
+          <Loader2 className="w-8 h-8 text-primary animate-spin" />
+          <span className="text-xs font-bold text-foreground tracking-wide">
+            Fetching live records from database...
+          </span>
         </div>
       )}
 
-      {/* Main AG Grid Enterprise Workspace Container (Maximizing height to calc(100vh - 160px)) */}
-      <div className={`flex-1 bg-card border border-border rounded-2xl overflow-hidden flex flex-col shadow-xl relative ${isFullscreen ? 'h-full' : 'h-[calc(100vh-165px)] min-h-[580px]'}`}>
-        
-        {/* Loading Overlay */}
-        {isLoadingData && !isUploading && (
-          <div className="absolute inset-0 z-30 bg-background/80 backdrop-blur-sm flex flex-col items-center justify-center space-y-3">
-            <Loader2 className="w-8 h-8 text-primary animate-spin" />
-            <span className="text-xs font-bold text-foreground tracking-wide">
-              Fetching live records from database...
-            </span>
-          </div>
-        )}
+      {/* Dynamic Workspace Content */}
+      {subTab === 'UNMATCHED' && docTab !== 'RAW_SAP' && docTab !== 'RAW_GSTR2B' ? (
+        /* SUB-TAB 3: NOT MATCHED — DUAL-PANE SPLIT VIEW */
+        <div className="flex-1 flex flex-col overflow-hidden min-h-0">
 
-        {/* WORKSPACE TOP TOOLBAR (Matching Reference Screenshot 3) */}
-        <div className="border-b border-border bg-card/95 flex flex-col shrink-0">
-          
-          {/* Toolbar Row 1: Wide Global Search + Dynamic Filters + Primary Action Buttons */}
-          <div className="px-4 py-2 flex flex-wrap items-center justify-between border-b border-border/60 gap-3">
-            
-            {/* Left: Wide Search Across All Fields (Matching Screenshot 3) */}
-            <div className="flex items-center space-x-2 flex-1 max-w-xl">
-              <div className="relative flex items-center w-full bg-background border border-border rounded-xl px-3 py-1.5 focus-within:border-primary transition-all shadow-inner">
-                <Search className="w-4 h-4 text-muted-foreground mr-2 shrink-0" />
-                <input
-                  type="text"
-                  placeholder="Search across all fields (e.g. Vendor, GSTIN, Invoice Num, ₹ Tax)..."
-                  value={quickFilterText}
-                  onChange={(e) => setQuickFilterText(e.target.value)}
-                  className="bg-transparent text-xs text-foreground focus:outline-none w-full placeholder:text-muted-foreground/60 font-medium"
-                />
-                {quickFilterText && (
-                  <button onClick={() => setQuickFilterText('')} className="text-muted-foreground hover:text-foreground p-0.5">
-                    <X className="w-3.5 h-3.5" />
-                  </button>
-                )}
+          {/* Success Toast */}
+          {matchSuccessMsg && (
+            <div className="mx-3 mt-2 bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 px-3 py-2 rounded-lg flex items-center justify-between text-xs font-semibold shrink-0">
+              <div className="flex items-center space-x-2">
+                <CheckCircle2 className="w-4 h-4 shrink-0" />
+                <span>{matchSuccessMsg}</span>
               </div>
-
-              {/* Global GSTIN Quick Input */}
-              <div className="relative flex items-center bg-background border border-border rounded-xl px-2.5 py-1.5 focus-within:border-primary transition-all shrink-0">
-                <Filter className="w-3.5 h-3.5 text-muted-foreground mr-1.5 shrink-0" />
-                <input
-                  type="text"
-                  placeholder="Filter GSTIN..."
-                  value={globalGstinFilter}
-                  onChange={(e) => setGlobalGstinFilter(e.target.value)}
-                  className="bg-transparent text-xs text-foreground focus:outline-none w-28 placeholder:text-muted-foreground/60 font-mono"
-                />
-                {globalGstinFilter && (
-                  <button onClick={() => setGlobalGstinFilter('')} className="text-muted-foreground hover:text-foreground p-0.5">
-                    <X className="w-3 h-3" />
-                  </button>
-                )}
-              </div>
-            </div>
-
-            {/* Right: Rows per page + Upload + Export + Fullscreen toggle */}
-            <div className="flex items-center space-x-2 shrink-0">
-              
-              {/* Rows Per Page Dropdown (Matching Screenshot 3) */}
-              <div className="flex items-center space-x-1.5 text-xs font-semibold text-foreground/70 bg-background px-2.5 py-1 rounded-xl border border-border">
-                <span className="text-[11px] text-muted-foreground font-bold hidden sm:inline">Rows per page:</span>
-                <select
-                  value={pageSize}
-                  onChange={(e) => setPageSize(Number(e.target.value))}
-                  className="bg-transparent text-xs font-bold text-primary focus:outline-none cursor-pointer"
-                >
-                  <option value={25}>25 / page</option>
-                  <option value={50}>50 / page</option>
-                  <option value={100}>100 / page</option>
-                  <option value={250}>250 / page</option>
-                  <option value={500}>500 / page</option>
-                  <option value={0}>All Rows</option>
-                </select>
-              </div>
-
-              {/* KPI Ribbon Toggle Button */}
-              <button
-                onClick={() => setShowKpiBar(!showKpiBar)}
-                className={`p-1.5 rounded-xl border text-xs font-semibold transition-all flex items-center space-x-1 ${
-                  showKpiBar ? 'bg-primary/20 border-primary/40 text-primary' : 'bg-background border-border text-foreground/70'
-                }`}
-                title={showKpiBar ? 'Hide KPI Summary Bar' : 'Show KPI Summary Bar'}
-              >
-                <CreditCard className="w-3.5 h-3.5" />
-                <span className="hidden md:inline text-[11px]">{showKpiBar ? 'Hide KPIs' : 'KPI Summary'}</span>
+              <button onClick={() => setMatchSuccessMsg(null)} className="hover:text-emerald-300 p-0.5">
+                <X className="w-4 h-4" />
               </button>
-
-              {/* Upload Files Modal Button */}
-              <button
-                onClick={() => setShowUploadModal(true)}
-                className="px-3 py-1.5 rounded-xl bg-secondary hover:bg-secondary/80 text-secondary-foreground font-bold text-xs border border-border flex items-center space-x-1.5 transition-all shadow-sm active:scale-95"
-              >
-                <Upload className="w-3.5 h-3.5 text-primary" />
-                <span>Upload Data</span>
-              </button>
-
-              {/* Export CSV Button */}
-              <button
-                onClick={handleExportCsv}
-                className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-sm flex items-center space-x-1.5 transition-all active:scale-95"
-              >
-                <Download className="w-3.5 h-3.5" />
-                <span>Export CSV</span>
-              </button>
-
-              {/* Dedicated Full Screen Toggle Button */}
-              <button
-                onClick={toggleFullscreen}
-                className={`p-1.5 rounded-xl border font-bold text-xs transition-all flex items-center space-x-1 ${
-                  isFullscreen 
-                    ? 'bg-rose-500/20 border-rose-500/40 text-rose-400 hover:bg-rose-500/30' 
-                    : 'bg-primary/10 border-primary/40 text-primary hover:bg-primary/20'
-                }`}
-                title={isFullscreen ? 'Exit Full Screen' : 'Expand Grid to Full Screen'}
-              >
-                {isFullscreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
-                <span className="hidden lg:inline text-[11px]">{isFullscreen ? 'Exit Fullscreen' : 'Full Screen Grid'}</span>
-              </button>
-
-            </div>
-          </div>
-
-          {/* Collapsible Compact KPI Summary Ribbon */}
-          {showKpiBar && (
-            <div className="px-4 py-2 bg-background/80 border-b border-border/60 grid grid-cols-2 md:grid-cols-4 gap-3 animate-in slide-in-from-top-2 duration-200">
-              <div className="bg-card border border-border p-2.5 rounded-xl border-l-4 border-l-blue-500 flex justify-between items-center">
-                <div>
-                  <div className="text-[10px] text-foreground/60 font-bold">Total Exposure</div>
-                  <div className="text-sm font-black text-foreground">{formatINR(counts.totalTaxSum)}</div>
-                </div>
-                <span className="text-[10px] bg-blue-500/10 text-blue-400 font-extrabold px-1.5 py-0.5 rounded">{gridRowData.length} Records</span>
-              </div>
-
-              <div className="bg-card border border-border p-2.5 rounded-xl border-l-4 border-l-emerald-500 flex justify-between items-center">
-                <div>
-                  <div className="text-[10px] text-foreground/60 font-bold">Matched & Ready</div>
-                  <div className="text-sm font-black text-emerald-400">{formatINR(counts.readyTaxSum)}</div>
-                </div>
-                <span className="text-[10px] bg-emerald-500/10 text-emerald-400 font-extrabold px-1.5 py-0.5 rounded">{counts.matched} Invoices</span>
-              </div>
-
-              <div className="bg-card border border-border p-2.5 rounded-xl border-l-4 border-l-amber-500 flex justify-between items-center">
-                <div>
-                  <div className="text-[10px] text-foreground/60 font-bold">Pending Review</div>
-                  <div className="text-sm font-black text-amber-400">{formatINR(counts.reviewTaxSum)}</div>
-                </div>
-                <span className="text-[10px] bg-amber-500/10 text-amber-400 font-extrabold px-1.5 py-0.5 rounded">{counts.review} Invoices</span>
-              </div>
-
-              <div className="bg-card border border-border p-2.5 rounded-xl border-l-4 border-l-rose-500 flex justify-between items-center">
-                <div>
-                  <div className="text-[10px] text-foreground/60 font-bold">Not Matched</div>
-                  <div className="text-sm font-black text-rose-400">{formatINR(counts.unmatchedTaxSum)}</div>
-                </div>
-                <span className="text-[10px] bg-rose-500/10 text-rose-400 font-extrabold px-1.5 py-0.5 rounded">{counts.unmatched} Pairs</span>
-              </div>
             </div>
           )}
 
-          {/* Toolbar Row 2: Document Type Tabs (B2B, CDNR, B2BA, RAW_SAP, RAW_GSTR2B) */}
-          <div className="flex items-center space-x-2 px-4 pt-1 bg-card/60 overflow-x-auto border-b border-border/40">
-            <button
-              onClick={() => setDocTab('B2B')}
-              className={`px-3.5 py-1.5 text-xs font-bold rounded-t-xl transition-all border-b-2 flex items-center space-x-1.5 shrink-0 ${
-                docTab === 'B2B' ? 'border-primary text-primary bg-primary/10' : 'border-transparent text-foreground/60 hover:text-foreground'
-              }`}
-            >
-              <FileText className="w-3.5 h-3.5" />
-              <span>B2B Invoices</span>
-              <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-primary/20 text-primary font-extrabold">{counts.b2bTotal}</span>
-            </button>
-
-            <button
-              onClick={() => setDocTab('CDNR')}
-              className={`px-3.5 py-1.5 text-xs font-bold rounded-t-xl transition-all border-b-2 flex items-center space-x-1.5 shrink-0 ${
-                docTab === 'CDNR' ? 'border-purple-500 text-purple-400 bg-purple-500/10' : 'border-transparent text-foreground/60 hover:text-foreground'
-              }`}
-            >
-              <FileMinus className="w-3.5 h-3.5" />
-              <span>Credit Notes (CDNR)</span>
-              <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-purple-500/20 text-purple-400 font-extrabold">{counts.cdnrTotal}</span>
-            </button>
-
-            <button
-              onClick={() => setDocTab('B2BA')}
-              className={`px-3.5 py-1.5 text-xs font-bold rounded-t-xl transition-all border-b-2 flex items-center space-x-1.5 shrink-0 ${
-                docTab === 'B2BA' ? 'border-amber-500 text-amber-400 bg-amber-500/10' : 'border-transparent text-foreground/60 hover:text-foreground'
-              }`}
-            >
-              <FileDiff className="w-3.5 h-3.5" />
-              <span>Amendments (B2BA)</span>
-              <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-amber-500/20 text-amber-400 font-extrabold">{counts.b2baTotal}</span>
-            </button>
-
-            <div className="h-4 w-[1px] bg-border mx-1 shrink-0" />
-
-            <button
-              onClick={() => setDocTab('RAW_SAP')}
-              className={`px-3 py-1.5 text-xs font-bold rounded-t-xl transition-all border-b-2 flex items-center space-x-1.5 shrink-0 ${
-                docTab === 'RAW_SAP' ? 'border-blue-500 text-blue-400 bg-blue-500/10' : 'border-transparent text-foreground/60 hover:text-foreground'
-              }`}
-            >
-              <Database className="w-3.5 h-3.5 text-blue-400" />
-              <span>Raw SAP</span>
-              <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-blue-500/20 text-blue-400 font-extrabold">{sapRawRecords.length}</span>
-            </button>
-
-            <button
-              onClick={() => setDocTab('RAW_GSTR2B')}
-              className={`px-3 py-1.5 text-xs font-bold rounded-t-xl transition-all border-b-2 flex items-center space-x-1.5 shrink-0 ${
-                docTab === 'RAW_GSTR2B' ? 'border-emerald-500 text-emerald-400 bg-emerald-500/10' : 'border-transparent text-foreground/60 hover:text-foreground'
-              }`}
-            >
-              <Globe className="w-3.5 h-3.5 text-emerald-400" />
-              <span>Raw GSTR-2B</span>
-              <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-emerald-500/20 text-emerald-400 font-extrabold">{gstr2bRawRecords.length}</span>
-            </button>
-          </div>
-
-          {/* Toolbar Row 3: Sub-Tabs inside Active Document Tab */}
-          {docTab !== 'RAW_SAP' && docTab !== 'RAW_GSTR2B' && (
-            <div className="flex flex-wrap items-center justify-between px-4 py-1.5 bg-background/60 gap-2">
-              <div className="flex items-center space-x-1.5 overflow-x-auto">
-                <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider mr-1">
-                  Sub-Views:
+          {/* Match Action Strip */}
+          <div className="px-3 py-1.5 flex items-center justify-between bg-surface border-b border-border/60 shrink-0">
+            <div className="flex items-center space-x-3 text-xs text-muted-foreground">
+              <span className="font-semibold">Select 1 row on each side to match</span>
+              {selectedSapRow && (
+                <span className="bg-blue-500/15 text-blue-400 px-2 py-0.5 rounded font-mono text-[11px] font-semibold border border-blue-500/30">
+                  SAP: {selectedSapRow.invoice_num}
                 </span>
-
-                <button
-                  onClick={() => setSubTab('MATCHED')}
-                  className={`px-3 py-1 rounded-xl text-xs font-bold transition-all flex items-center space-x-1.5 ${
-                    subTab === 'MATCHED'
-                      ? 'bg-emerald-500 text-white shadow-sm'
-                      : 'text-emerald-400/80 hover:text-emerald-400 hover:bg-emerald-500/10'
-                  }`}
-                >
-                  <CheckCircle2 className="w-3.5 h-3.5" />
-                  <span>1) Completely Matched</span>
-                  <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-black/20 font-extrabold">{counts.matched}</span>
-                </button>
-
-                <button
-                  onClick={() => setSubTab('REVIEW')}
-                  className={`px-3 py-1 rounded-xl text-xs font-bold transition-all flex items-center space-x-1.5 ${
-                    subTab === 'REVIEW'
-                      ? 'bg-amber-500 text-white shadow-sm'
-                      : 'text-amber-400/80 hover:text-amber-400 hover:bg-amber-500/10'
-                  }`}
-                >
-                  <AlertTriangle className="w-3.5 h-3.5" />
-                  <span>2) Review</span>
-                  <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-black/20 font-extrabold">{counts.review}</span>
-                </button>
-
-                <button
-                  onClick={() => setSubTab('UNMATCHED')}
-                  className={`px-3 py-1 rounded-xl text-xs font-bold transition-all flex items-center space-x-1.5 ${
-                    subTab === 'UNMATCHED'
-                      ? 'bg-rose-500 text-white shadow-sm'
-                      : 'text-rose-400/80 hover:text-rose-400 hover:bg-rose-500/10'
-                  }`}
-                >
-                  <Unlink className="w-3.5 h-3.5" />
-                  <span>3) Not Matched (Split View)</span>
-                  <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-black/20 font-extrabold">{counts.unmatched}</span>
-                </button>
-
-                <button
-                  onClick={() => setSubTab('MANUAL')}
-                  className={`px-3 py-1 rounded-xl text-xs font-bold transition-all flex items-center space-x-1.5 ${
-                    subTab === 'MANUAL'
-                      ? 'bg-indigo-600 text-white shadow-sm'
-                      : 'text-indigo-400/80 hover:text-indigo-400 hover:bg-indigo-500/10'
-                  }`}
-                >
-                  <ShieldCheck className="w-3.5 h-3.5" />
-                  <span>4) Manually Matched</span>
-                  <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-black/20 font-extrabold">{counts.manual}</span>
-                </button>
-              </div>
+              )}
+              {selectedGstRow && (
+                <span className="bg-emerald-500/15 text-emerald-400 px-2 py-0.5 rounded font-mono text-[11px] font-semibold border border-emerald-500/30">
+                  GST: {selectedGstRow.invoice_num}
+                </span>
+              )}
             </div>
-          )}
+            <button
+              onClick={() => handleForceManualMatch()}
+              disabled={!selectedSapRow || !selectedGstRow || isMatching}
+              className={`px-4 py-1.5 rounded-lg font-bold text-xs transition-all flex items-center space-x-1.5 ${
+                selectedSapRow && selectedGstRow
+                  ? 'gradient-primary text-white shadow-md active:scale-[0.97] cursor-pointer'
+                  : 'bg-muted text-muted-foreground cursor-not-allowed'
+              }`}
+            >
+              {isMatching ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Link2 className="w-3.5 h-3.5" />}
+              <span>Match Selected</span>
+            </button>
+          </div>
 
-        </div>
-
-        {/* Dynamic Workspace Content */}
-        {subTab === 'UNMATCHED' && docTab !== 'RAW_SAP' && docTab !== 'RAW_GSTR2B' ? (
-          /* SUB-TAB 3: NOT MATCHED — CLEAN DUAL-PANE SPLIT VIEW */
-          <div className="flex-1 flex flex-col overflow-hidden">
-
-            {/* Success Toast */}
-            {matchSuccessMsg && (
-              <div className="mx-3 mt-2 bg-green-50 border border-green-200 text-green-700 px-3 py-2 rounded-lg flex items-center justify-between text-xs font-semibold shrink-0">
+          {/* Split View 2-Column Grid */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-0 flex-1 min-h-0">
+            
+            {/* Left Pane: Unmatched SAP Records */}
+            <div className="flex flex-col border-r border-border/60 min-h-0">
+              <div className="flex items-center justify-between px-3 py-1.5 bg-blue-500/8 border-b border-border/60 shrink-0">
                 <div className="flex items-center space-x-2">
-                  <CheckCircle2 className="w-4 h-4 shrink-0" />
-                  <span>{matchSuccessMsg}</span>
+                  <Database className="w-3.5 h-3.5 text-blue-400" />
+                  <h4 className="text-xs font-bold text-foreground">SAP Purchase Register</h4>
+                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/15 text-blue-400 font-bold border border-blue-500/30">
+                    {unmatchedSapRecords.length}
+                  </span>
                 </div>
-                <button onClick={() => setMatchSuccessMsg(null)} className="hover:text-green-900 p-0.5">
-                  <X className="w-4 h-4" />
-                </button>
+                <div className="relative flex items-center bg-surface border border-border/60 rounded px-2 py-0.5">
+                  <Search className="w-3 h-3 text-muted-foreground mr-1 shrink-0" />
+                  <input type="text" placeholder="Filter..." value={leftSapGstinFilter}
+                    onChange={(e) => setLeftSapGstinFilter(e.target.value)}
+                    className="bg-transparent text-[11px] text-foreground focus:outline-none w-20" />
+                  {leftSapGstinFilter && (
+                    <button onClick={() => setLeftSapGstinFilter('')} className="text-muted-foreground hover:text-foreground">
+                      <X className="w-3 h-3" />
+                    </button>
+                  )}
+                </div>
               </div>
-            )}
-
-            {/* Match Action Strip — compact inline bar */}
-            <div className="px-3 py-1.5 flex items-center justify-between bg-slate-50 border-b border-slate-200 shrink-0">
-              <div className="flex items-center space-x-3 text-xs text-slate-600">
-                <span className="font-semibold">Select 1 row on each side to match</span>
-                {selectedSapRow && (
-                  <span className="bg-blue-50 text-blue-700 px-2 py-0.5 rounded font-mono text-[11px] font-semibold border border-blue-200">
-                    SAP: {selectedSapRow.invoice_num}
-                  </span>
-                )}
-                {selectedGstRow && (
-                  <span className="bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded font-mono text-[11px] font-semibold border border-emerald-200">
-                    GST: {selectedGstRow.invoice_num}
-                  </span>
-                )}
+              <div className="flex-1 ag-theme-alpine w-full min-h-0">
+                <AgGridReact
+                  theme="legacy"
+                  rowData={unmatchedSapRecords}
+                  columnDefs={unmatchedSapColumnDefs as any}
+                  rowSelection={{ mode: 'singleRow', enableClickSelection: true, checkboxes: false }}
+                  onSelectionChanged={(e) => {
+                    const rows = e.api.getSelectedRows();
+                    setSelectedSapRow(rows.length > 0 ? rows[0] : null);
+                  }}
+                  onGridReady={(params) => params.api.sizeColumnsToFit()}
+                  defaultColDef={{ resizable: true, sortable: true, filter: true, floatingFilter: true }}
+                  animateRows={true}
+                  rowHeight={28}
+                  headerHeight={32}
+                  floatingFiltersHeight={28}
+                  enableCellTextSelection={true}
+                  ensureDomOrder={true}
+                />
               </div>
-              <button
-                onClick={() => handleForceManualMatch()}
-                disabled={!selectedSapRow || !selectedGstRow || isMatching}
-                className={`px-4 py-1.5 rounded-lg font-bold text-xs transition-all flex items-center space-x-1.5 ${
-                  selectedSapRow && selectedGstRow
-                    ? 'bg-blue-600 hover:bg-blue-700 text-white shadow-sm active:scale-95 cursor-pointer'
-                    : 'bg-slate-200 text-slate-400 cursor-not-allowed'
-                }`}
-              >
-                {isMatching ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Link2 className="w-3.5 h-3.5" />}
-                <span>Match Selected</span>
-              </button>
             </div>
 
-            {/* Split View 2-Column Grid */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-0 flex-1 min-h-0">
-              
-              {/* Left Pane: Unmatched SAP Records */}
-              <div className="flex flex-col border-r border-slate-200 min-h-0">
-                <div className="flex items-center justify-between px-3 py-1.5 bg-blue-50 border-b border-slate-200 shrink-0">
-                  <div className="flex items-center space-x-2">
-                    <Database className="w-3.5 h-3.5 text-blue-600" />
-                    <h4 className="text-xs font-bold text-slate-800">SAP Purchase Register</h4>
-                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 font-bold">
-                      {unmatchedSapRecords.length}
-                    </span>
-                  </div>
-                  <div className="relative flex items-center bg-white border border-slate-300 rounded px-2 py-0.5">
-                    <Search className="w-3 h-3 text-slate-400 mr-1 shrink-0" />
-                    <input
-                      type="text"
-                      placeholder="Filter GSTIN..."
-                      value={leftSapGstinFilter}
-                      onChange={(e) => setLeftSapGstinFilter(e.target.value)}
-                      className="bg-transparent text-[11px] text-slate-800 focus:outline-none w-24"
-                    />
-                    {leftSapGstinFilter && (
-                      <button onClick={() => setLeftSapGstinFilter('')} className="text-slate-400 hover:text-slate-600">
-                        <X className="w-3 h-3" />
-                      </button>
-                    )}
-                  </div>
+            {/* Right Pane: Unmatched GSTR-2B Records */}
+            <div className="flex flex-col min-h-0">
+              <div className="flex items-center justify-between px-3 py-1.5 bg-emerald-500/8 border-b border-border/60 shrink-0">
+                <div className="flex items-center space-x-2">
+                  <Globe className="w-3.5 h-3.5 text-emerald-400" />
+                  <h4 className="text-xs font-bold text-foreground">GSTR-2B Portal</h4>
+                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400 font-bold border border-emerald-500/30">
+                    {unmatchedGstRecords.length}
+                  </span>
                 </div>
-
-                <div className="flex-1 ag-theme-alpine w-full min-h-0">
-                  <AgGridReact
-                    theme="legacy"
-                    rowData={unmatchedSapRecords}
-                    columnDefs={unmatchedSapColumnDefs as any}
-                    rowSelection={{ mode: 'singleRow', enableClickSelection: true, checkboxes: false }}
-                    onSelectionChanged={(e) => {
-                      const rows = e.api.getSelectedRows();
-                      setSelectedSapRow(rows.length > 0 ? rows[0] : null);
-                    }}
-                    onGridReady={(params) => params.api.sizeColumnsToFit()}
-                    defaultColDef={{ resizable: true, sortable: true, filter: true, floatingFilter: true }}
-                    animateRows={true}
-                    rowHeight={28}
-                    headerHeight={32}
-                    floatingFiltersHeight={28}
-                    enableCellTextSelection={true}
-                    ensureDomOrder={true}
-                  />
+                <div className="relative flex items-center bg-surface border border-border/60 rounded px-2 py-0.5">
+                  <Search className="w-3 h-3 text-muted-foreground mr-1 shrink-0" />
+                  <input type="text" placeholder="Filter..." value={rightGstGstinFilter}
+                    onChange={(e) => setRightGstGstinFilter(e.target.value)}
+                    className="bg-transparent text-[11px] text-foreground focus:outline-none w-20" />
+                  {rightGstGstinFilter && (
+                    <button onClick={() => setRightGstGstinFilter('')} className="text-muted-foreground hover:text-foreground">
+                      <X className="w-3 h-3" />
+                    </button>
+                  )}
                 </div>
               </div>
-
-              {/* Right Pane: Unmatched GSTR-2B Records */}
-              <div className="flex flex-col min-h-0">
-                <div className="flex items-center justify-between px-3 py-1.5 bg-emerald-50 border-b border-slate-200 shrink-0">
-                  <div className="flex items-center space-x-2">
-                    <Globe className="w-3.5 h-3.5 text-emerald-600" />
-                    <h4 className="text-xs font-bold text-slate-800">GSTR-2B Portal</h4>
-                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 font-bold">
-                      {unmatchedGstRecords.length}
-                    </span>
-                  </div>
-                  <div className="relative flex items-center bg-white border border-slate-300 rounded px-2 py-0.5">
-                    <Search className="w-3 h-3 text-slate-400 mr-1 shrink-0" />
-                    <input
-                      type="text"
-                      placeholder="Filter GSTIN..."
-                      value={rightGstGstinFilter}
-                      onChange={(e) => setRightGstGstinFilter(e.target.value)}
-                      className="bg-transparent text-[11px] text-slate-800 focus:outline-none w-24"
-                    />
-                    {rightGstGstinFilter && (
-                      <button onClick={() => setRightGstGstinFilter('')} className="text-slate-400 hover:text-slate-600">
-                        <X className="w-3 h-3" />
-                      </button>
-                    )}
-                  </div>
-                </div>
-
-                <div className="flex-1 ag-theme-alpine w-full min-h-0">
-                  <AgGridReact
-                    theme="legacy"
-                    rowData={unmatchedGstRecords}
-                    columnDefs={unmatchedGstColumnDefs as any}
-                    rowSelection={{ mode: 'singleRow', enableClickSelection: true, checkboxes: false }}
-                    onSelectionChanged={(e) => {
-                      const rows = e.api.getSelectedRows();
-                      setSelectedGstRow(rows.length > 0 ? rows[0] : null);
-                    }}
-                    onGridReady={(params) => params.api.sizeColumnsToFit()}
-                    defaultColDef={{ resizable: true, sortable: true, filter: true, floatingFilter: true }}
-                    animateRows={true}
-                    rowHeight={28}
-                    headerHeight={32}
-                    floatingFiltersHeight={28}
-                    enableCellTextSelection={true}
-                    ensureDomOrder={true}
-                  />
-                </div>
+              <div className="flex-1 ag-theme-alpine w-full min-h-0">
+                <AgGridReact
+                  theme="legacy"
+                  rowData={unmatchedGstRecords}
+                  columnDefs={unmatchedGstColumnDefs as any}
+                  rowSelection={{ mode: 'singleRow', enableClickSelection: true, checkboxes: false }}
+                  onSelectionChanged={(e) => {
+                    const rows = e.api.getSelectedRows();
+                    setSelectedGstRow(rows.length > 0 ? rows[0] : null);
+                  }}
+                  onGridReady={(params) => params.api.sizeColumnsToFit()}
+                  defaultColDef={{ resizable: true, sortable: true, filter: true, floatingFilter: true }}
+                  animateRows={true}
+                  rowHeight={28}
+                  headerHeight={32}
+                  floatingFiltersHeight={28}
+                  enableCellTextSelection={true}
+                  ensureDomOrder={true}
+                />
               </div>
-
             </div>
           </div>
-        ) : (
-          /* STANDARD FULL HEIGHT AG GRID VIEW */
-          <div className="flex-1 ag-theme-alpine w-full h-full min-h-0">
-            <AgGridReact
-              ref={gridRef}
-              theme="legacy"
-              rowData={gridRowData}
-              columnDefs={activeColumnDefs as any}
-              rowSelection={rowSelection}
-              getRowStyle={getRowStyle}
-              onSelectionChanged={onSelectionChanged}
-              onFilterChanged={onFilterChanged}
-              onGridReady={onGridReady}
-              onModelUpdated={onModelUpdated}
-              pinnedBottomRowData={docTab === 'RAW_SAP' || docTab === 'RAW_GSTR2B' ? [] : pinnedBottomRowData}
-              quickFilterText={quickFilterText}
-              pagination={pageSize > 0}
-              paginationPageSize={pageSize > 0 ? pageSize : undefined}
-              rowHeight={28}
-              headerHeight={32}
-              floatingFiltersHeight={28}
-              enableCellTextSelection={true}
-              ensureDomOrder={true}
-              defaultColDef={{
-                resizable: true,
-                sortable: true,
-                filter: true,
-                floatingFilter: true,
-              }}
-              animateRows={true}
-            />
-          </div>
-        )}
-
-      </div>
-
+        </div>
+      ) : (
+        /* STANDARD FULL HEIGHT AG GRID VIEW */
+        <div className="flex-1 ag-theme-alpine w-full h-full min-h-0">
+          <AgGridReact
+            ref={gridRef}
+            theme="legacy"
+            rowData={gridRowData}
+            columnDefs={activeColumnDefs as any}
+            rowSelection={rowSelection}
+            getRowStyle={getRowStyle}
+            onSelectionChanged={onSelectionChanged}
+            onRowClicked={onRowClicked}
+            onFilterChanged={onFilterChanged}
+            onGridReady={onGridReady}
+            onModelUpdated={onModelUpdated}
+            pinnedBottomRowData={docTab === 'RAW_SAP' || docTab === 'RAW_GSTR2B' ? [] : pinnedBottomRowData}
+            quickFilterText={quickFilterText}
+            pagination={pageSize > 0}
+            paginationPageSize={pageSize > 0 ? pageSize : undefined}
+            rowHeight={28}
+            headerHeight={32}
+            floatingFiltersHeight={28}
+            enableCellTextSelection={true}
+            ensureDomOrder={true}
+            defaultColDef={{
+              resizable: true,
+              sortable: true,
+              filter: true,
+              floatingFilter: true,
+            }}
+            animateRows={true}
+          />
+        </div>
+      )}
     </div>
   );
 };
