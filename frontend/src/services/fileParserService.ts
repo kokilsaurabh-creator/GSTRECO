@@ -1,4 +1,5 @@
 import type { SapRawRecord, Gstr2bRawRecord } from '../data/mockDataFallback';
+import * as XLSX from 'xlsx';
 
 export interface IngestionResult {
   recordsParsed: number;
@@ -22,26 +23,43 @@ export const fileParserService = {
         const docData = json.data || json;
         const gstin = docData.gstin || defaultGstin;
         const returnPeriod = docData.fp || defaultPeriod;
+        
         const b2bList = docData.docdata?.b2b || docData.b2b || [];
+        const cdnrList = docData.docdata?.cdnr || docData.cdnr || [];
+        const b2baList = docData.docdata?.b2ba || docData.b2ba || [];
 
         let count = 0;
+        const addRecord = (supplierName: string, supplierGstin: string, invNum: string, invDate: string, invType: string, val: number, totalTax: number, cgst: number, sgst: number, igst: number, itcavl: string) => {
+          count++;
+          parsedRecords.push({
+            id: `gst-import-${Date.now()}-${count}`,
+            gstin,
+            supplier_name: supplierName,
+            supplier_gstin: supplierGstin,
+            invoice_num: invNum,
+            invoice_number: invNum,
+            invoice_date: invDate,
+            invoice_type: invType,
+            taxable_value: val - totalTax > 0 ? val - totalTax : val,
+            total_tax: totalTax,
+            cgst,
+            sgst,
+            igst,
+            itc_available: itcavl,
+            return_period: returnPeriod,
+          });
+        };
+
         for (const supplier of b2bList) {
           const supplierGstin = supplier.ctin || '';
           const supplierName = supplier.trdnm || supplier.tradeName || supplierGstin;
           const invList = supplier.inv || [];
-
           for (const inv of invList) {
-            count++;
-            const invNum = inv.inum || `INV-${count}`;
+            const invNum = inv.inum || `INV-${count + 1}`;
             const invDate = inv.idt || new Date().toISOString().split('T')[0];
             const invType = inv.typ || 'B2B';
             const val = parseFloat(inv.val || '0');
-
-            let totalTax = 0;
-            let cgst = 0;
-            let sgst = 0;
-            let igst = 0;
-
+            let totalTax = 0, cgst = 0, sgst = 0, igst = 0;
             const items = inv.items || [];
             for (const item of items) {
               const det = item.item_det || item;
@@ -50,24 +68,52 @@ export const fileParserService = {
               igst += parseFloat(det.iamt || '0');
               totalTax += parseFloat(det.camt || '0') + parseFloat(det.samt || '0') + parseFloat(det.iamt || '0');
             }
+            addRecord(supplierName, supplierGstin, invNum, invDate, invType, val, totalTax, cgst, sgst, igst, inv.itcavl || 'Y');
+          }
+        }
 
-            parsedRecords.push({
-              id: `gst-import-${Date.now()}-${count}`,
-              gstin,
-              supplier_name: supplierName,
-              supplier_gstin: supplierGstin,
-              invoice_num: invNum,
-              invoice_number: invNum,
-              invoice_date: invDate,
-              invoice_type: invType,
-              taxable_value: val - totalTax > 0 ? val - totalTax : val,
-              total_tax: totalTax,
-              cgst,
-              sgst,
-              igst,
-              itc_available: inv.itcavl || 'Y',
-              return_period: returnPeriod,
-            });
+        for (const supplier of b2baList) {
+          const supplierGstin = supplier.ctin || '';
+          const supplierName = supplier.trdnm || supplier.tradeName || supplierGstin;
+          const invList = supplier.inv || [];
+          for (const inv of invList) {
+            const invNum = inv.inum || `INV-${count + 1}`;
+            const invDate = inv.idt || new Date().toISOString().split('T')[0];
+            const invType = inv.typ || 'B2BA';
+            const val = parseFloat(inv.val || '0');
+            let totalTax = 0, cgst = 0, sgst = 0, igst = 0;
+            const items = inv.items || [];
+            for (const item of items) {
+              const det = item.item_det || item;
+              cgst += parseFloat(det.camt || '0');
+              sgst += parseFloat(det.samt || '0');
+              igst += parseFloat(det.iamt || '0');
+              totalTax += parseFloat(det.camt || '0') + parseFloat(det.samt || '0') + parseFloat(det.iamt || '0');
+            }
+            addRecord(supplierName, supplierGstin, invNum, invDate, invType, val, totalTax, cgst, sgst, igst, inv.itcavl || 'Y');
+          }
+        }
+
+        for (const supplier of cdnrList) {
+          const supplierGstin = supplier.ctin || '';
+          const supplierName = supplier.trdnm || supplier.tradeName || supplierGstin;
+          const ntList = supplier.nt || [];
+          for (const nt of ntList) {
+            const ntNum = nt.ntNum || `NT-${count + 1}`;
+            const ntDate = nt.ntDt || new Date().toISOString().split('T')[0];
+            const ntType = nt.ntty || 'CDNR';
+            const val = parseFloat(nt.val || '0');
+            let totalTax = 0, cgst = 0, sgst = 0, igst = 0;
+            const items = nt.items || [];
+            for (const item of items) {
+              const det = item.item_det || item;
+              cgst += parseFloat(det.camt || '0');
+              sgst += parseFloat(det.samt || '0');
+              igst += parseFloat(det.iamt || '0');
+              totalTax += parseFloat(det.camt || '0') + parseFloat(det.samt || '0') + parseFloat(det.iamt || '0');
+            }
+            const mult = ntType === 'C' ? -1 : 1;
+            addRecord(supplierName, supplierGstin, ntNum, ntDate, ntType, val * mult, totalTax * mult, cgst * mult, sgst * mult, igst * mult, nt.itcavl || 'Y');
           }
         }
         filesProcessed++;
@@ -86,11 +132,43 @@ export const fileParserService = {
 
   async parseSapFile(file: File, defaultGstin: string, defaultPeriod: string): Promise<IngestionResult> {
     try {
-      const text = await file.text();
       const parsedRecords: SapRawRecord[] = [];
 
-      // Check if JSON format or CSV text format
-      if (file.name.endsWith('.json')) {
+      // Check if XLSX or JSON or CSV text format
+      if (file.name.endsWith('.xlsx') || file.name.endsWith('.xls')) {
+        const arrayBuffer = await file.arrayBuffer();
+        const workbook = XLSX.read(arrayBuffer, { type: 'array', cellDates: true });
+        const sheetName = workbook.SheetNames[0];
+        const sheet = workbook.Sheets[sheetName];
+        const rows: any[] = XLSX.utils.sheet_to_json(sheet);
+
+        rows.forEach((row, idx) => {
+          let docDate = row.invoice_date || row.posting_date || new Date().toISOString().split('T')[0];
+          if (docDate instanceof Date) {
+            docDate = docDate.toISOString().split('T')[0];
+          } else if (typeof docDate === 'number') {
+            docDate = new Date(Math.round((docDate - 25569) * 86400 * 1000)).toISOString().split('T')[0];
+          }
+
+          parsedRecords.push({
+            id: `sap-import-xls-${Date.now()}-${idx}`,
+            gstin: row.own_gstin || defaultGstin,
+            vendor_name: row.vendor_name || 'Vendor',
+            vendor_gstin: row.vendor_gstin || '',
+            invoice_num: String(row.invoice_num || row.sap_doc_no || `SAP-INV-${idx}`),
+            document_number: String(row.sap_doc_no || row.invoice_num || `51000${idx}`),
+            invoice_date: String(docDate),
+            document_date: String(docDate),
+            taxable_value: parseFloat(row.taxable_base || row.taxable_value || '0'),
+            total_tax: parseFloat(row.total_tax || '0'),
+            cgst: parseFloat(row.cgst || '0'),
+            sgst: parseFloat(row.sgst || '0'),
+            igst: parseFloat(row.igst || '0'),
+            return_period: defaultPeriod,
+          });
+        });
+      } else if (file.name.endsWith('.json')) {
+        const text = await file.text();
         const json = JSON.parse(text);
         const rows = Array.isArray(json) ? json : json.records || [];
         rows.forEach((row: any, idx: number) => {
@@ -113,6 +191,7 @@ export const fileParserService = {
         });
       } else {
         // CSV Text Parser
+        const text = await file.text();
         const lines = text.split('\n');
         lines.slice(1).forEach((line, idx) => {
           if (!line.trim()) return;
