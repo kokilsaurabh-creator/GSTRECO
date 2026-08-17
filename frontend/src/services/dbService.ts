@@ -86,6 +86,17 @@ export const dbService = {
     });
   },
 
+  async clearRecoResults(): Promise<void> {
+    const db = await openDB();
+    const tx = db.transaction('reco_results', 'readwrite');
+    const store = tx.objectStore('reco_results');
+    const request = store.clear();
+    return new Promise((resolve, reject) => {
+      request.onsuccess = () => resolve();
+      request.onerror = () => reject(request.error);
+    });
+  },
+
   async getAllSapRecords(): Promise<SapRawRecord[]> {
     const db = await openDB();
     const tx = db.transaction('sap_records', 'readonly');

@@ -174,17 +174,11 @@ export const useAppStore = create<AppState>((set, get) => ({
         let storedSap = await dbService.getAllSapRecords();
         let storedGstr = await dbService.getAllGstr2bRecords();
 
-        // Seed initial sample data if IndexedDB is empty on first load
-        if (storedSap.length === 0 && storedGstr.length === 0) {
-          await dbService.saveSapRecords(MOCK_SAP_RECORDS);
-          await dbService.saveGstr2bRecords(MOCK_GSTR2B_RECORDS);
-          storedSap = MOCK_SAP_RECORDS;
-          storedGstr = MOCK_GSTR2B_RECORDS;
-        }
-
+        // Always re-run client side reco if we have raw records but are offline
         let storedReco = await dbService.getAllRecoResults();
-        if (storedReco.length === 0) {
+        if (storedSap.length > 0 || storedGstr.length > 0) {
           storedReco = runClientSideReconciliation(storedSap, storedGstr);
+          await dbService.clearRecoResults();
           await dbService.saveRecoResults(storedReco);
         }
 
