@@ -180,7 +180,18 @@ export const AgGridWorkspace: React.FC<AgGridWorkspaceProps> = ({
         const term = globalGstinFilter.trim().toUpperCase();
         dataset = dataset.filter(s => (s.vendor_gstin || '').toUpperCase().includes(term));
       }
-      return dataset;
+      return dataset.map(s => {
+        const reco = records.find(r => r.sap_record?.id === s.id);
+        if (reco) {
+          return {
+            ...s,
+            reconciliation_status: reco.match_status,
+            match_level: reco.match_level,
+            matched_gstr_invoice_number: reco.gst_record?.invoice_num || '-'
+          };
+        }
+        return s;
+      });
     }
     if (docTab === 'RAW_GSTR2B') {
       let dataset = gstr2bRawRecords;
@@ -188,7 +199,18 @@ export const AgGridWorkspace: React.FC<AgGridWorkspaceProps> = ({
         const term = globalGstinFilter.trim().toUpperCase();
         dataset = dataset.filter(g => (g.supplier_gstin || '').toUpperCase().includes(term));
       }
-      return dataset;
+      return dataset.map(g => {
+        const reco = records.find(r => r.gst_record?.id === g.id);
+        if (reco) {
+          return {
+            ...g,
+            reconciliation_status: reco.match_status,
+            match_level: reco.match_level,
+            matched_sap_document_number: reco.sap_record?.invoice_num || '-'
+          };
+        }
+        return g;
+      });
     }
 
     if (subTab === 'MATCHED') {
