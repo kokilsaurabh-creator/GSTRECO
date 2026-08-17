@@ -51,28 +51,28 @@ export const Header: React.FC = () => {
   }, [activeGstin]);
 
   return (
-    <header className="h-16 bg-card border-b border-border px-6 flex items-center justify-between z-20 shadow-sm shrink-0">
+    <header className="h-14 glass-strong border-b border-border/60 px-6 flex items-center justify-between z-20 shrink-0">
       
       {/* Title / Context Indicator */}
       <div className="flex items-center space-x-3">
-        <div className="hidden sm:flex items-center space-x-2 bg-primary/10 px-3 py-1.5 rounded-xl border border-primary/20">
-          <Sparkles className="w-4 h-4 text-primary animate-pulse" />
-          <span className="text-xs font-semibold text-primary">3-Way Automated Reco Engine</span>
+        <div className="hidden sm:flex items-center space-x-2 bg-primary/8 px-3 py-1.5 rounded-lg border border-primary/15">
+          <Sparkles className="w-3.5 h-3.5 text-primary animate-pulse" />
+          <span className="text-[11px] font-semibold text-primary tracking-wide">4-Level Reco Engine (IndexedDB Serverless)</span>
         </div>
       </div>
 
       {/* Top Header Controls (Context Bar) */}
-      <div className="flex items-center space-x-4">
+      <div className="flex items-center space-x-3">
         
         {/* GSTIN Switcher */}
-        <div className="relative flex items-center bg-background border border-border rounded-xl px-3 py-1.5 focus-within:border-primary transition-colors">
-          <Building2 className="w-4 h-4 text-primary mr-2 shrink-0" />
+        <div className="relative flex items-center bg-surface border border-border/60 rounded-lg px-3 py-1.5 focus-within:border-primary/40 transition-colors">
+          <Building2 className="w-3.5 h-3.5 text-primary mr-2 shrink-0" />
           <div className="flex flex-col">
-            <span className="text-[10px] uppercase font-semibold text-foreground/50 leading-none">Active GSTIN</span>
+            <span className="text-[9px] uppercase font-bold text-muted-foreground leading-none tracking-wider">GSTIN</span>
             <select
               value={activeGstin}
               onChange={(e) => setActiveGstin(e.target.value)}
-              className="bg-transparent text-xs font-bold text-foreground focus:outline-none cursor-pointer pr-4"
+              className="bg-transparent text-[11px] font-bold text-foreground focus:outline-none cursor-pointer pr-4 font-mono"
             >
               {allGstinOptions.map((opt) => (
                 <option key={opt.gstin} value={opt.gstin} className="bg-card text-foreground">
@@ -81,18 +81,18 @@ export const Header: React.FC = () => {
               ))}
             </select>
           </div>
-          <ChevronDown className="w-3.5 h-3.5 text-foreground/50 pointer-events-none absolute right-2.5" />
+          <ChevronDown className="w-3 h-3 text-muted-foreground pointer-events-none absolute right-2.5" />
         </div>
 
         {/* Period Selector */}
-        <div className="relative flex items-center bg-background border border-border rounded-xl px-3 py-1.5 focus-within:border-primary transition-colors">
-          <Calendar className="w-4 h-4 text-emerald-400 mr-2 shrink-0" />
+        <div className="relative flex items-center bg-surface border border-border/60 rounded-lg px-3 py-1.5 focus-within:border-primary/40 transition-colors">
+          <Calendar className="w-3.5 h-3.5 text-emerald-400 mr-2 shrink-0" />
           <div className="flex flex-col">
-            <span className="text-[10px] uppercase font-semibold text-foreground/50 leading-none">Return Period</span>
+            <span className="text-[9px] uppercase font-bold text-muted-foreground leading-none tracking-wider">Period</span>
             <select
               value={returnPeriod}
               onChange={(e) => setReturnPeriod(e.target.value)}
-              className="bg-transparent text-xs font-bold text-foreground focus:outline-none cursor-pointer pr-4"
+              className="bg-transparent text-[11px] font-bold text-foreground focus:outline-none cursor-pointer pr-4"
             >
               {PERIOD_OPTIONS.map((period) => (
                 <option key={period} value={period} className="bg-card text-foreground">
@@ -101,14 +101,14 @@ export const Header: React.FC = () => {
               ))}
             </select>
           </div>
-          <ChevronDown className="w-3.5 h-3.5 text-foreground/50 pointer-events-none absolute right-2.5" />
+          <ChevronDown className="w-3 h-3 text-muted-foreground pointer-events-none absolute right-2.5" />
         </div>
 
-        {/* Primary Sleek Run Reconciliation Button */}
+        {/* Primary Run Reconciliation Button */}
         <button
           onClick={runReconciliation}
           disabled={isRunningReco}
-          className="flex items-center px-4 py-2 bg-gradient-to-r from-primary via-indigo-600 to-purple-600 hover:from-primary/90 hover:to-purple-700 text-white rounded-xl font-extrabold text-xs transition-all shadow-md shadow-primary/20 active:scale-95 disabled:opacity-50 shrink-0 space-x-2"
+          className="flex items-center px-4 py-2 gradient-primary hover:opacity-90 text-white rounded-lg font-bold text-[11px] transition-all shadow-lg shadow-primary/20 active:scale-[0.97] disabled:opacity-50 shrink-0 space-x-2"
           title="Run 4-Level Reconciliation Engine"
         >
           {isRunningReco ? (
@@ -119,25 +119,25 @@ export const Header: React.FC = () => {
           <span>{isRunningReco ? 'Running...' : 'Run Reconciliation'}</span>
         </button>
 
-        {/* User Notifications */}
-        <button className="p-2 rounded-xl bg-background border border-border hover:border-primary/40 text-foreground/70 hover:text-foreground transition-colors relative">
+        {/* Notifications */}
+        <button className="p-2 rounded-lg bg-surface border border-border/60 hover:border-primary/30 text-muted-foreground hover:text-foreground transition-colors relative">
           <Bell className="w-4 h-4" />
-          <span className="absolute top-1 right-1 w-2 h-2 bg-primary rounded-full"></span>
+          <span className="absolute top-1.5 right-1.5 w-1.5 h-1.5 bg-primary rounded-full"></span>
         </button>
 
         {/* User Profile & Role Switcher */}
-        <div className="flex items-center space-x-2 pl-2 border-l border-border">
-          <div className="w-8 h-8 rounded-full bg-gradient-to-r from-blue-500 to-indigo-600 flex items-center justify-center text-white font-bold text-xs shadow-sm">
+        <div className="flex items-center space-x-2.5 pl-3 border-l border-border/60">
+          <div className="w-8 h-8 rounded-lg gradient-primary flex items-center justify-center text-white font-bold text-[10px] shadow-md shadow-primary/15">
             AP
           </div>
           <div className="hidden lg:flex flex-col">
-            <span className="text-xs font-bold text-foreground leading-tight">Apex Administrator</span>
+            <span className="text-[11px] font-bold text-foreground leading-tight">Apex Admin</span>
             <div className="flex items-center">
               <UserCheck className="w-3 h-3 text-emerald-400 mr-1" />
               <select
                 value={role}
                 onChange={(e) => setRole(e.target.value as UserRole)}
-                className="bg-transparent text-[11px] font-semibold text-primary focus:outline-none cursor-pointer"
+                className="bg-transparent text-[10px] font-semibold text-primary focus:outline-none cursor-pointer"
               >
                 {ROLES.map((r) => (
                   <option key={r} value={r} className="bg-card text-foreground">

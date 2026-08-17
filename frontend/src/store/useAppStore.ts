@@ -1,10 +1,20 @@
 import { create } from 'zustand';
 import type { RecoRecord } from '../data/mockData';
+import { MOCK_SAP_RECORDS, MOCK_GSTR2B_RECORDS } from '../data/mockDataFallback';
+import { dbService } from '../services/dbService';
+import { runClientSideReconciliation } from '../services/recoEngineService';
 import axios from 'axios';
 
 export type UserRole = 'Admin' | 'Customer' | 'Auditor';
 
-const API_BASE = 'http://localhost:8000/api/v1';
+const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api/v1';
+
+interface UploadState {
+  isUploading: boolean;
+  uploadProgress: number;
+  uploadStatusText: string;
+  uploadErrorLog: string | null;
+}
 
 interface AppState {
   activeGstin: string;
@@ -20,6 +30,16 @@ interface AppState {
   gstr2bRawRecords: any[];
   selectedRowIds: string[];
 
+  // Discrepancy Panel
+  selectedRecord: RecoRecord | null;
+  discrepancyPanelOpen: boolean;
+
+  // Filter Panel
+  filterPanelCollapsed: boolean;
+
+  // Upload State (shared across views)
+  upload: UploadState;
+
   recoProgress: number;
   recoStatusText: string;
   recoError: string | null;
@@ -33,6 +53,11 @@ interface AppState {
 
   setRecords: (records: RecoRecord[]) => void;
   setSelectedRowIds: (ids: string[]) => void;
+  setSelectedRecord: (record: RecoRecord | null) => void;
+  setDiscrepancyPanelOpen: (open: boolean) => void;
+  setFilterPanelCollapsed: (collapsed: boolean) => void;
+  setUploadState: (state: Partial<UploadState>) => void;
+
   fetchDashboardData: (gstin?: string, period?: string) => Promise<void>;
   runReconciliation: () => Promise<void>;
   clearRecoError: () => void;
@@ -42,6 +67,10 @@ interface AppState {
   acceptSelectedMatches: () => void;
   rejectSelectedMatches: () => void;
   deferSelectedMatches: () => void;
+  clearRawData: (target: 'SAP' | 'GSTR2B' | 'ALL', allPeriods?: boolean) => Promise<{ status: string; message: string; sap_deleted: number; gstr_deleted: number; reco_deleted: number }>;
+
+  // Manual actions on single records
+  acceptPortalValue: (record: RecoRecord) => Promise<void>;
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
@@ -49,7 +78,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   returnPeriod: 'June 2026',
   role: 'Admin',
   sidebarCollapsed: false,
-  activeNavTab: '2B Reconciliation',
+  activeNavTab: 'Reconciliation',
   isRunningReco: false,
   isLoadingData: false,
   
@@ -57,6 +86,21 @@ export const useAppStore = create<AppState>((set, get) => ({
   sapRawRecords: [],
   gstr2bRawRecords: [],
   selectedRowIds: [],
+
+  // Discrepancy Panel
+  selectedRecord: null,
+  discrepancyPanelOpen: false,
+
+  // Filter Panel
+  filterPanelCollapsed: false,
+
+  // Upload State
+  upload: {
+    isUploading: false,
+    uploadProgress: 0,
+    uploadStatusText: '',
+    uploadErrorLog: null,
+  },
 
   recoProgress: 0,
   recoStatusText: '',
@@ -77,6 +121,10 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   setRecords: (records) => set({ records }),
   setSelectedRowIds: (selectedRowIds) => set({ selectedRowIds }),
+  setSelectedRecord: (selectedRecord) => set({ selectedRecord, discrepancyPanelOpen: !!selectedRecord }),
+  setDiscrepancyPanelOpen: (discrepancyPanelOpen) => set({ discrepancyPanelOpen, selectedRecord: discrepancyPanelOpen ? get().selectedRecord : null }),
+  setFilterPanelCollapsed: (filterPanelCollapsed) => set({ filterPanelCollapsed }),
+  setUploadState: (uploadUpdate) => set((state) => ({ upload: { ...state.upload, ...uploadUpdate } })),
 
   clearRecoError: () => set({ recoError: null }),
   clearRecoLogs: () => set({ recoLogs: [] }),
@@ -89,18 +137,11 @@ export const useAppStore = create<AppState>((set, get) => ({
 
     set({ isLoadingData: true });
     try {
-      // Parallelized API Requests via Promise.all
-      const [resReco, resSap, resGstr2b] = await Promise.all([
-        axios.get(`${API_BASE}/reconcile/results`, {
-          params: { gstin: activeGstin, period: returnPeriod }
-        }),
-        axios.get(`${API_BASE}/data/sap`, {
-          params: { gstin: activeGstin, period: returnPeriod }
-        }),
-        axios.get(`${API_BASE}/data/gstr2b`, {
-          params: { gstin: activeGstin, period: returnPeriod }
-        })
-      ]);
+      // 1. Try fetching from backend if active
+      const resReco = await axios.get(`${API_BASE}/reconcile/results`, {
+        params: { gstin: activeGstin, period: returnPeriod },
+        timeout: 1500
+      });
 
       const recoData: RecoRecord[] = Array.isArray(resReco.data) ? resReco.data.map((item: any, idx: number) => ({
         id: item.match_id || item.id || `reco-${idx}`,
@@ -112,12 +153,10 @@ export const useAppStore = create<AppState>((set, get) => ({
         invoice_type: item.invoice_type || null,
         sap_record: item.sap_record || null,
         gst_record: item.gst_record || null,
-        // SAP column properties (strictly isolated to sap_record)
         vendor_name: item.sap_record?.vendor_name || '-',
         invoice_num: item.sap_record?.invoice_num || '-',
         invoice_date: item.sap_record?.invoice_date || '-',
         total_tax: item.sap_record?.total_tax ?? 0,
-        // GSTR-2B column properties (strictly isolated to gst_record)
         supplier_name: item.gst_record?.supplier_name || '-',
         portal_invoice_num: item.gst_record?.invoice_num || '-',
         portal_invoice_date: item.gst_record?.invoice_date || '-',
@@ -127,13 +166,38 @@ export const useAppStore = create<AppState>((set, get) => ({
 
       set({
         records: recoData,
-        sapRawRecords: Array.isArray(resSap.data) ? resSap.data : [],
-        gstr2bRawRecords: Array.isArray(resGstr2b.data) ? resGstr2b.data : []
+        isLoadingData: false
       });
     } catch (err: any) {
-      console.error('Error fetching dashboard data:', err);
-    } finally {
-      set({ isLoadingData: false });
+      // 2. Client-Side Serverless Mode (IndexedDB)
+      try {
+        let storedSap = await dbService.getAllSapRecords();
+        let storedGstr = await dbService.getAllGstr2bRecords();
+
+        // Seed initial sample data if IndexedDB is empty on first load
+        if (storedSap.length === 0 && storedGstr.length === 0) {
+          await dbService.saveSapRecords(MOCK_SAP_RECORDS);
+          await dbService.saveGstr2bRecords(MOCK_GSTR2B_RECORDS);
+          storedSap = MOCK_SAP_RECORDS;
+          storedGstr = MOCK_GSTR2B_RECORDS;
+        }
+
+        let storedReco = await dbService.getAllRecoResults();
+        if (storedReco.length === 0) {
+          storedReco = runClientSideReconciliation(storedSap, storedGstr);
+          await dbService.saveRecoResults(storedReco);
+        }
+
+        set({
+          sapRawRecords: storedSap,
+          gstr2bRawRecords: storedGstr,
+          records: storedReco,
+          isLoadingData: false
+        });
+      } catch (dbErr) {
+        console.error('Error accessing IndexedDB:', dbErr);
+        set({ isLoadingData: false });
+      }
     }
   },
 
@@ -144,9 +208,9 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ 
       isRunningReco: true, 
       recoProgress: 15,
-      recoStatusText: 'Initializing Engine & Clearing Prior Runs...',
+      recoStatusText: 'Initializing Client-Side Reco Engine & Cleared Prior Runs...',
       recoError: null,
-      recoLogs: [`[${timestamp}] Starting 4-Level Reconciliation Engine for GSTIN ${activeGstin} (${returnPeriod})`]
+      recoLogs: [`[${timestamp}] Executing 4-Level Client-Side Reco Engine for GSTIN ${activeGstin} (${returnPeriod})`]
     });
 
     let progressTimer: any = null;
@@ -155,61 +219,63 @@ export const useAppStore = create<AppState>((set, get) => ({
       progressTimer = setInterval(() => {
         set((state) => {
           if (state.recoProgress < 85) {
-            const nextProgress = state.recoProgress + 10;
+            const nextProgress = state.recoProgress + 15;
             let status = state.recoStatusText;
             if (nextProgress >= 30 && nextProgress < 60) {
-              status = 'Executing Level 1 & Level 2 Matching Logic...';
+              status = 'Executing Level 1 & Level 2 Matching Logic in Browser RAM...';
             } else if (nextProgress >= 60) {
-              status = 'Executing Level 3 & Level 4 Signature/Fuzzy Matching...';
+              status = 'Executing Level 3 & Level 4 Signature Matching...';
             }
             return { recoProgress: nextProgress, recoStatusText: status };
           }
           return state;
         });
-      }, 400);
+      }, 150);
 
-      const res = await axios.post(`${API_BASE}/reconcile/run`, null, {
-        params: { gstin: activeGstin, period: returnPeriod }
+      // Try running via FastAPI backend if active
+      await axios.post(`${API_BASE}/reconcile/run`, null, {
+        params: { gstin: activeGstin, period: returnPeriod },
+        timeout: 1500
       });
 
       if (progressTimer) clearInterval(progressTimer);
-
-      const doneTime = new Date().toLocaleTimeString();
-      set({ 
-        recoProgress: 90, 
-        recoStatusText: 'Engine Execution Completed. Loading Results...',
-        recoLogs: [...get().recoLogs, `[${doneTime}] Engine Execution Successful: ${res.data?.message || 'Success'}`]
-      });
-
       await fetchDashboardData(activeGstin, returnPeriod);
 
       const finishTime = new Date().toLocaleTimeString();
       set({ 
         recoProgress: 100, 
         recoStatusText: 'Reconciliation Completed Successfully!',
-        recoLogs: [...get().recoLogs, `[${finishTime}] Reco Results & AG Grid View Updated.`]
+        recoLogs: [...get().recoLogs, `[${finishTime}] Backend Reco Results & AG Grid View Updated.`]
       });
 
       setTimeout(() => {
         set({ isRunningReco: false, recoProgress: 0, recoStatusText: '' });
-      }, 2000);
+      }, 1500);
 
     } catch (err: any) {
       if (progressTimer) clearInterval(progressTimer);
-      console.error('Error executing reconciliation engine:', err);
-      let errMsg = err.response?.data?.detail || err.message || 'Engine execution failed.';
-      if (err.message === 'Network Error' || err.code === 'ERR_NETWORK') {
-        errMsg = 'Backend API server at http://localhost:8000 is unreachable. Please verify FastAPI service status.';
-      }
+
+      // Run Client-Side Engine in JS
+      const currentSap = get().sapRawRecords.length > 0 ? get().sapRawRecords : await dbService.getAllSapRecords();
+      const currentGstr = get().gstr2bRawRecords.length > 0 ? get().gstr2bRawRecords : await dbService.getAllGstr2bRecords();
+      const recoResults = runClientSideReconciliation(currentSap, currentGstr);
       
-      const errTime = new Date().toLocaleTimeString();
+      // Save to IndexedDB
+      await dbService.saveRecoResults(recoResults);
+
+      const finishTime = new Date().toLocaleTimeString();
       set({ 
-        isRunningReco: false, 
-        recoProgress: 0, 
-        recoStatusText: '',
-        recoError: errMsg,
-        recoLogs: [...get().recoLogs, `[${errTime}] ERROR: ${errMsg}`]
+        records: recoResults,
+        sapRawRecords: currentSap,
+        gstr2bRawRecords: currentGstr,
+        recoProgress: 100, 
+        recoStatusText: 'Reconciliation Completed (Client-Side IndexedDB Engine)!',
+        recoLogs: [...get().recoLogs, `[${finishTime}] Client-side Engine Executed: ${recoResults.length} matches computed and saved to IndexedDB.`]
       });
+
+      setTimeout(() => {
+        set({ isRunningReco: false, recoProgress: 0, recoStatusText: '' });
+      }, 1500);
     }
   },
 
@@ -259,5 +325,65 @@ export const useAppStore = create<AppState>((set, get) => ({
       return r;
     });
     set({ records: updated, selectedRowIds: [] });
-  }
+  },
+
+  clearRawData: async (target: 'SAP' | 'GSTR2B' | 'ALL', allPeriods = false) => {
+    const { activeGstin, returnPeriod, fetchDashboardData } = get();
+    set({ isLoadingData: true });
+    try {
+      const res = await axios.delete(`${API_BASE}/data/clear`, {
+        params: {
+          gstin: activeGstin,
+          target,
+          period: returnPeriod,
+          all_periods: allPeriods
+        },
+        timeout: 2500
+      });
+      await fetchDashboardData(activeGstin, returnPeriod);
+      return res.data;
+    } catch (err: any) {
+      console.warn('Backend clear API unavailable, clearing IndexedDB state:', err.message);
+      await dbService.clearAllData();
+      set({ sapRawRecords: [], gstr2bRawRecords: [], records: [] });
+      return { status: 'success', message: 'Cleared client-side IndexedDB database state.', sap_deleted: 0, gstr_deleted: 0, reco_deleted: 0 };
+    } finally {
+      set({ isLoadingData: false });
+    }
+  },
+
+  acceptPortalValue: async (record: RecoRecord) => {
+    const { activeGstin, returnPeriod, fetchDashboardData } = get();
+    
+    if (!record.sap_record?.id || !record.gst_record?.id) {
+      // For records that are already matched, just update local status
+      const updated = get().records.map((r) => {
+        if (r.id === record.id) {
+          return { ...r, match_status: 'Ready to Claim', match_level: 'Level 2: Manually Accepted' };
+        }
+        return r;
+      });
+      set({ records: updated, discrepancyPanelOpen: false, selectedRecord: null });
+      return;
+    }
+
+    try {
+      await axios.post(`${API_BASE}/reconcile/manual-match`, {
+        sap_id: String(record.sap_record.id),
+        gst_id: String(record.gst_record.id)
+      }, { timeout: 2500 });
+      
+      await fetchDashboardData(activeGstin, returnPeriod);
+      set({ discrepancyPanelOpen: false, selectedRecord: null });
+    } catch (err: any) {
+      console.warn('Backend manual match API unavailable, updating client-side state:', err.message);
+      const updated = get().records.map((r) => {
+        if (r.id === record.id) {
+          return { ...r, match_status: 'Ready to Claim', match_level: 'Level 2: Manually Accepted' };
+        }
+        return r;
+      });
+      set({ records: updated, discrepancyPanelOpen: false, selectedRecord: null });
+    }
+  },
 }));

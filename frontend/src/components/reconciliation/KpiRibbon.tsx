@@ -57,8 +57,8 @@ export const KpiRibbon: React.FC = () => {
       title: 'Total ITC Available (GSTR-2B)',
       amount: metrics.totalItc,
       subtitle: `From ${metrics.totalCount} Total Invoices`,
-      borderColor: 'border-l-blue-500',
-      badgeBg: 'bg-blue-500/10 text-blue-400',
+      borderColor: 'border-l-primary',
+      badgeBg: 'bg-primary/10 text-primary',
       icon: CreditCard,
     },
     {
@@ -91,7 +91,7 @@ export const KpiRibbon: React.FC = () => {
   ];
 
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 p-4">
       {cards.map((card, idx) => {
         const Icon = card.icon;
         return (
@@ -100,10 +100,10 @@ export const KpiRibbon: React.FC = () => {
             initial={{ opacity: 0, y: 15 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.3, delay: idx * 0.05 }}
-            className={`bg-card border border-border border-l-4 ${card.borderColor} p-5 rounded-2xl shadow-sm hover:shadow-md transition-all flex flex-col justify-between`}
+            className={`glass border-l-4 ${card.borderColor} p-5 rounded-2xl transition-all flex flex-col justify-between hover:border-l-[6px] cursor-default`}
           >
             <div className="flex items-center justify-between mb-3">
-              <span className="text-xs font-semibold text-foreground/60 tracking-tight">
+              <span className="text-xs font-bold text-muted-foreground uppercase tracking-wider">
                 {card.title}
               </span>
               <div className={`p-2 rounded-xl ${card.badgeBg}`}>
@@ -112,10 +112,10 @@ export const KpiRibbon: React.FC = () => {
             </div>
 
             <div>
-              <div className="text-2xl font-black text-foreground tracking-tight">
+              <div className="text-2xl font-black font-financial text-foreground tracking-tight">
                 {formatINR(card.amount)}
               </div>
-              <p className="text-[11px] font-medium text-foreground/50 mt-1">
+              <p className="text-[11px] font-medium text-muted-foreground mt-1">
                 {card.subtitle}
               </p>
             </div>

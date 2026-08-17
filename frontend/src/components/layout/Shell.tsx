@@ -18,7 +18,7 @@ export const Shell: React.FC<ShellProps> = ({ children }) => {
         <Header />
 
         {/* Page Workspace View */}
-        <main className="flex-1 overflow-y-auto p-6 flex flex-col space-y-6">
+        <main className="flex-1 overflow-y-auto overflow-x-hidden">
           {children}
         </main>
       </div>
