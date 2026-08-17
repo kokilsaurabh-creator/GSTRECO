@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAppStore } from '../../store/useAppStore';
+import { fileParserService } from '../../services/fileParserService';
+import { dbService } from '../../services/dbService';
 import axios from 'axios';
 import {
   FileJson,
@@ -108,19 +110,37 @@ export const DataImportView: React.FC = () => {
         setLocalStatus('');
       }, 1500);
     } catch (err: any) {
-      console.warn('Backend upload API offline, completing ingestion in client-side demo mode:', err.message);
-      setLocalProgress(100);
-      const msg = `Successfully imported ${selectedFiles.length} file(s) in client-side demo mode!`;
-      setLocalStatus(msg);
-      setSuccessMsg(msg);
+      console.warn('Backend upload API offline, completing ingestion in client-side IndexedDB mode:', err.message);
+      setLocalProgress(80);
 
-      await fetchDashboardData(activeGstin, returnPeriod);
+      try {
+        if (type === 'gstr2b') {
+          const parsed = await fileParserService.parseGstr2bJson(selectedFiles, activeGstin, returnPeriod);
+          await dbService.saveGstr2bRecords(parsed.gstrRecords || []);
+          setLocalProgress(100);
+          setLocalStatus(parsed.message);
+          setSuccessMsg(parsed.message);
+        } else {
+          const parsed = await fileParserService.parseSapFile(selectedFiles[0], activeGstin, returnPeriod);
+          await dbService.saveSapRecords(parsed.sapRecords || []);
+          setLocalProgress(100);
+          setLocalStatus(parsed.message);
+          setSuccessMsg(parsed.message);
+        }
 
-      setTimeout(() => {
-        setLocalUploading(false);
+        await fetchDashboardData(activeGstin, returnPeriod);
+
+        setTimeout(() => {
+          setLocalUploading(false);
+          setLocalProgress(0);
+          setLocalStatus('');
+        }, 1500);
+      } catch (parseErr: any) {
         setLocalProgress(0);
-        setLocalStatus('');
-      }, 1500);
+        setLocalStatus('Ingestion Error');
+        setLocalError(parseErr.message || 'Failed to parse file client-side.');
+        setLocalUploading(false);
+      }
     } finally {
       e.target.value = '';
     }

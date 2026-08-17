@@ -57,7 +57,7 @@ export const Header: React.FC = () => {
       <div className="flex items-center space-x-3">
         <div className="hidden sm:flex items-center space-x-2 bg-primary/8 px-3 py-1.5 rounded-lg border border-primary/15">
           <Sparkles className="w-3.5 h-3.5 text-primary animate-pulse" />
-          <span className="text-[11px] font-semibold text-primary tracking-wide">4-Level Automated Engine</span>
+          <span className="text-[11px] font-semibold text-primary tracking-wide">4-Level Reco Engine (IndexedDB Serverless)</span>
         </div>
       </div>
 

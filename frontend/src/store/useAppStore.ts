@@ -1,6 +1,8 @@
 import { create } from 'zustand';
 import type { RecoRecord } from '../data/mockData';
-import { MOCK_SAP_RECORDS, MOCK_GSTR2B_RECORDS, generateMockRecoResults } from '../data/mockDataFallback';
+import { MOCK_SAP_RECORDS, MOCK_GSTR2B_RECORDS } from '../data/mockDataFallback';
+import { dbService } from '../services/dbService';
+import { runClientSideReconciliation } from '../services/recoEngineService';
 import axios from 'axios';
 
 export type UserRole = 'Admin' | 'Customer' | 'Auditor';
@@ -135,10 +137,10 @@ export const useAppStore = create<AppState>((set, get) => ({
 
     set({ isLoadingData: true });
     try {
-      // 1. Fetch main reconciliation results FIRST to render primary UI instantly
+      // 1. Try fetching from backend if active
       const resReco = await axios.get(`${API_BASE}/reconcile/results`, {
         params: { gstin: activeGstin, period: returnPeriod },
-        timeout: 2500
+        timeout: 1500
       });
 
       const recoData: RecoRecord[] = Array.isArray(resReco.data) ? resReco.data.map((item: any, idx: number) => ({
@@ -162,80 +164,40 @@ export const useAppStore = create<AppState>((set, get) => ({
         return_period: item.return_period || returnPeriod,
       })) : [];
 
-      // Immediately unblock main UI in ~0.2s!
       set({
         records: recoData,
         isLoadingData: false
       });
+    } catch (err: any) {
+      // 2. Client-Side Serverless Mode (IndexedDB)
+      try {
+        let storedSap = await dbService.getAllSapRecords();
+        let storedGstr = await dbService.getAllGstr2bRecords();
 
-      // 2. Fetch raw SAP & GSTR-2B data asynchronously in background without blocking the UI
-      Promise.all([
-        axios.get(`${API_BASE}/data/sap`, {
-          params: { gstin: activeGstin, period: returnPeriod },
-          timeout: 2500
-        }),
-        axios.get(`${API_BASE}/data/gstr2b`, {
-          params: { gstin: activeGstin, period: returnPeriod },
-          timeout: 2500
-        })
-      ]).then(([resSap, resGstr2b]) => {
-        // Build O(1) maps for fast lookup
-        const sapRecoMap = new Map();
-        const gstRecoMap = new Map();
-        
-        for (const reco of recoData) {
-          if (reco.sap_record && reco.sap_record.id) {
-            sapRecoMap.set(reco.sap_record.id, reco);
-          }
-          if (reco.gst_record && reco.gst_record.id) {
-            gstRecoMap.set(reco.gst_record.id, reco);
-          }
+        // Seed initial sample data if IndexedDB is empty on first load
+        if (storedSap.length === 0 && storedGstr.length === 0) {
+          await dbService.saveSapRecords(MOCK_SAP_RECORDS);
+          await dbService.saveGstr2bRecords(MOCK_GSTR2B_RECORDS);
+          storedSap = MOCK_SAP_RECORDS;
+          storedGstr = MOCK_GSTR2B_RECORDS;
         }
 
-        const enrichedSap = Array.isArray(resSap.data) ? resSap.data.map((sap: any) => {
-          const matched = sapRecoMap.get(sap.id);
-          return {
-            ...sap,
-            reconciliation_status: matched ? matched.match_status : 'Unmatched',
-            match_level: matched ? matched.match_level : 'Unmatched',
-            matched_gstr_invoice_number: matched?.gst_record?.invoice_num || null,
-            matched_gstr_total_tax: matched?.gst_record?.total_tax != null ? matched.gst_record.total_tax : null,
-            matched_gstr_supplier_name: matched?.gst_record?.supplier_name || null
-          };
-        }) : [];
-
-        const enrichedGstr = Array.isArray(resGstr2b.data) ? resGstr2b.data.map((gst: any) => {
-          const matched = gstRecoMap.get(gst.id);
-          return {
-            ...gst,
-            reconciliation_status: matched ? matched.match_status : 'Unmatched',
-            match_level: matched ? matched.match_level : 'Unmatched',
-            matched_sap_document_number: matched?.sap_record?.invoice_num || null,
-            matched_sap_total_tax: matched?.sap_record?.total_tax != null ? matched.sap_record.total_tax : null,
-            matched_sap_vendor_name: matched?.sap_record?.vendor_name || null
-          };
-        }) : [];
+        let storedReco = await dbService.getAllRecoResults();
+        if (storedReco.length === 0) {
+          storedReco = runClientSideReconciliation(storedSap, storedGstr);
+          await dbService.saveRecoResults(storedReco);
+        }
 
         set({
-          sapRawRecords: enrichedSap,
-          gstr2bRawRecords: enrichedGstr
+          sapRawRecords: storedSap,
+          gstr2bRawRecords: storedGstr,
+          records: storedReco,
+          isLoadingData: false
         });
-      }).catch((err) => {
-        console.warn('Background fetch of raw records failed, falling back to mock data:', err);
-      });
-
-    } catch (err: any) {
-      console.info('Backend unavailable or network error. Using in-browser client-side demo mode.');
-      const currentSap = get().sapRawRecords.length > 0 ? get().sapRawRecords : MOCK_SAP_RECORDS;
-      const currentGstr = get().gstr2bRawRecords.length > 0 ? get().gstr2bRawRecords : MOCK_GSTR2B_RECORDS;
-      const mockReco = generateMockRecoResults(currentSap, currentGstr);
-
-      set({
-        records: mockReco,
-        sapRawRecords: currentSap,
-        gstr2bRawRecords: currentGstr,
-        isLoadingData: false
-      });
+      } catch (dbErr) {
+        console.error('Error accessing IndexedDB:', dbErr);
+        set({ isLoadingData: false });
+      }
     }
   },
 
@@ -246,9 +208,9 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ 
       isRunningReco: true, 
       recoProgress: 15,
-      recoStatusText: 'Initializing Engine & Clearing Prior Runs...',
+      recoStatusText: 'Initializing Client-Side Reco Engine & Cleared Prior Runs...',
       recoError: null,
-      recoLogs: [`[${timestamp}] Starting 4-Level Reconciliation Engine for GSTIN ${activeGstin} (${returnPeriod})`]
+      recoLogs: [`[${timestamp}] Executing 4-Level Client-Side Reco Engine for GSTIN ${activeGstin} (${returnPeriod})`]
     });
 
     let progressTimer: any = null;
@@ -257,62 +219,58 @@ export const useAppStore = create<AppState>((set, get) => ({
       progressTimer = setInterval(() => {
         set((state) => {
           if (state.recoProgress < 85) {
-            const nextProgress = state.recoProgress + 10;
+            const nextProgress = state.recoProgress + 15;
             let status = state.recoStatusText;
             if (nextProgress >= 30 && nextProgress < 60) {
-              status = 'Executing Level 1 & Level 2 Matching Logic...';
+              status = 'Executing Level 1 & Level 2 Matching Logic in Browser RAM...';
             } else if (nextProgress >= 60) {
-              status = 'Executing Level 3 & Level 4 Signature/Fuzzy Matching...';
+              status = 'Executing Level 3 & Level 4 Signature Matching...';
             }
             return { recoProgress: nextProgress, recoStatusText: status };
           }
           return state;
         });
-      }, 400);
+      }, 150);
 
-      const res = await axios.post(`${API_BASE}/reconcile/run`, null, {
+      // Try running via FastAPI backend if active
+      await axios.post(`${API_BASE}/reconcile/run`, null, {
         params: { gstin: activeGstin, period: returnPeriod },
-        timeout: 3000
+        timeout: 1500
       });
 
       if (progressTimer) clearInterval(progressTimer);
-
-      const doneTime = new Date().toLocaleTimeString();
-      set({ 
-        recoProgress: 90, 
-        recoStatusText: 'Engine Execution Completed. Loading Results...',
-        recoLogs: [...get().recoLogs, `[${doneTime}] Engine Execution Successful: ${res.data?.message || 'Success'}`]
-      });
-
       await fetchDashboardData(activeGstin, returnPeriod);
 
       const finishTime = new Date().toLocaleTimeString();
       set({ 
         recoProgress: 100, 
         recoStatusText: 'Reconciliation Completed Successfully!',
-        recoLogs: [...get().recoLogs, `[${finishTime}] Reco Results & AG Grid View Updated.`]
+        recoLogs: [...get().recoLogs, `[${finishTime}] Backend Reco Results & AG Grid View Updated.`]
       });
 
       setTimeout(() => {
         set({ isRunningReco: false, recoProgress: 0, recoStatusText: '' });
-      }, 2000);
+      }, 1500);
 
     } catch (err: any) {
       if (progressTimer) clearInterval(progressTimer);
-      console.info('Executing client-side in-browser reconciliation engine...');
+
+      // Run Client-Side Engine in JS
+      const currentSap = get().sapRawRecords.length > 0 ? get().sapRawRecords : await dbService.getAllSapRecords();
+      const currentGstr = get().gstr2bRawRecords.length > 0 ? get().gstr2bRawRecords : await dbService.getAllGstr2bRecords();
+      const recoResults = runClientSideReconciliation(currentSap, currentGstr);
       
-      const currentSap = get().sapRawRecords.length > 0 ? get().sapRawRecords : MOCK_SAP_RECORDS;
-      const currentGstr = get().gstr2bRawRecords.length > 0 ? get().gstr2bRawRecords : MOCK_GSTR2B_RECORDS;
-      const recoResults = generateMockRecoResults(currentSap, currentGstr);
-      
+      // Save to IndexedDB
+      await dbService.saveRecoResults(recoResults);
+
       const finishTime = new Date().toLocaleTimeString();
       set({ 
         records: recoResults,
         sapRawRecords: currentSap,
         gstr2bRawRecords: currentGstr,
         recoProgress: 100, 
-        recoStatusText: 'Reconciliation Completed (In-Browser Demo Mode)!',
-        recoLogs: [...get().recoLogs, `[${finishTime}] Client-side Engine Executed: ${recoResults.length} matches computed.`]
+        recoStatusText: 'Reconciliation Completed (Client-Side IndexedDB Engine)!',
+        recoLogs: [...get().recoLogs, `[${finishTime}] Client-side Engine Executed: ${recoResults.length} matches computed and saved to IndexedDB.`]
       });
 
       setTimeout(() => {
@@ -385,11 +343,10 @@ export const useAppStore = create<AppState>((set, get) => ({
       await fetchDashboardData(activeGstin, returnPeriod);
       return res.data;
     } catch (err: any) {
-      console.warn('Backend clear API unavailable, clearing client-side state:', err.message);
-      if (target === 'SAP' || target === 'ALL') set({ sapRawRecords: [] });
-      if (target === 'GSTR2B' || target === 'ALL') set({ gstr2bRawRecords: [] });
-      if (target === 'ALL') set({ records: [] });
-      return { status: 'success', message: 'Cleared client-side demo state.', sap_deleted: 0, gstr_deleted: 0, reco_deleted: 0 };
+      console.warn('Backend clear API unavailable, clearing IndexedDB state:', err.message);
+      await dbService.clearAllData();
+      set({ sapRawRecords: [], gstr2bRawRecords: [], records: [] });
+      return { status: 'success', message: 'Cleared client-side IndexedDB database state.', sap_deleted: 0, gstr_deleted: 0, reco_deleted: 0 };
     } finally {
       set({ isLoadingData: false });
     }
