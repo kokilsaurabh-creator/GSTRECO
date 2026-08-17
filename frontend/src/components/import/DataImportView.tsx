@@ -83,7 +83,7 @@ export const DataImportView: React.FC = () => {
       setLocalProgress(45);
       setLocalStatus(`Parsing & ingesting ${type === 'gstr2b' ? 'GSTR-2B JSON' : 'SAP MM Register'}...`);
 
-      const endpoint = type === 'gstr2b' ? `${API_BASE}/ingest/gstr2b-json` : `${API_BASE}/ingestion/sap-mm`;
+      const endpoint = type === 'gstr2b' ? `${API_BASE}/ingestion/gstr2b-json` : `${API_BASE}/ingestion/sap-mm`;
       const res = await axios.post(endpoint, formData, {
         timeout: 5000,
         onUploadProgress: (progressEvent: any) => {

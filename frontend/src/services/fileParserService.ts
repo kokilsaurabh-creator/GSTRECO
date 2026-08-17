@@ -13,8 +13,10 @@ export const fileParserService = {
   async parseGstr2bJson(files: File[], defaultGstin: string, defaultPeriod: string): Promise<IngestionResult> {
     const parsedRecords: Gstr2bRawRecord[] = [];
     let filesProcessed = 0;
+    let globalCount = 0;
 
-    for (const file of files) {
+    for (let fileIdx = 0; fileIdx < files.length; fileIdx++) {
+      const file = files[fileIdx];
       try {
         const text = await file.text();
         const json = JSON.parse(text);
@@ -28,11 +30,10 @@ export const fileParserService = {
         const cdnrList = docData.docdata?.cdnr || docData.cdnr || [];
         const b2baList = docData.docdata?.b2ba || docData.b2ba || [];
 
-        let count = 0;
         const addRecord = (supplierName: string, supplierGstin: string, invNum: string, invDate: string, invType: string, val: number, totalTax: number, cgst: number, sgst: number, igst: number, itcavl: string) => {
-          count++;
+          globalCount++;
           parsedRecords.push({
-            id: `gst-import-${Date.now()}-${count}`,
+            id: `gst-import-${fileIdx}-${Date.now()}-${globalCount}`,
             gstin,
             supplier_name: supplierName,
             supplier_gstin: supplierGstin,
@@ -55,7 +56,7 @@ export const fileParserService = {
           const supplierName = supplier.trdnm || supplier.tradeName || supplierGstin;
           const invList = supplier.inv || [];
           for (const inv of invList) {
-            const invNum = inv.inum || `INV-${count + 1}`;
+            const invNum = inv.inum || `INV-${globalCount + 1}`;
             const invDate = inv.idt || new Date().toISOString().split('T')[0];
             const invType = inv.typ || 'B2B';
             const val = parseFloat(inv.val || '0');
@@ -77,7 +78,7 @@ export const fileParserService = {
           const supplierName = supplier.trdnm || supplier.tradeName || supplierGstin;
           const invList = supplier.inv || [];
           for (const inv of invList) {
-            const invNum = inv.inum || `INV-${count + 1}`;
+            const invNum = inv.inum || `INV-${globalCount + 1}`;
             const invDate = inv.idt || new Date().toISOString().split('T')[0];
             const invType = inv.typ || 'B2BA';
             const val = parseFloat(inv.val || '0');
@@ -99,7 +100,7 @@ export const fileParserService = {
           const supplierName = supplier.trdnm || supplier.tradeName || supplierGstin;
           const ntList = supplier.nt || [];
           for (const nt of ntList) {
-            const ntNum = nt.ntNum || `NT-${count + 1}`;
+            const ntNum = nt.ntNum || `NT-${globalCount + 1}`;
             const ntDate = nt.ntDt || new Date().toISOString().split('T')[0];
             const ntType = nt.ntty || 'CDNR';
             const val = parseFloat(nt.val || '0');
