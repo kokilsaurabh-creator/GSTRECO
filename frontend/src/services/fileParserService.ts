@@ -62,12 +62,21 @@ export const fileParserService = {
             const val = parseFloat(inv.val || '0');
             let totalTax = 0, cgst = 0, sgst = 0, igst = 0;
             const items = inv.items || [];
-            for (const item of items) {
-              const det = item.item_det || item;
-              cgst += parseFloat(det.camt || '0');
-              sgst += parseFloat(det.samt || '0');
-              igst += parseFloat(det.iamt || '0');
-              totalTax += parseFloat(det.camt || '0') + parseFloat(det.samt || '0') + parseFloat(det.iamt || '0');
+            
+            // Extract from root if present
+            cgst = parseFloat(inv.camt || inv.cgst || '0');
+            sgst = parseFloat(inv.samt || inv.sgst || '0');
+            igst = parseFloat(inv.iamt || inv.igst || '0');
+            totalTax = cgst + sgst + igst;
+
+            if (items.length > 0 && totalTax === 0) {
+              for (const item of items) {
+                const det = item.item_det || item;
+                cgst += parseFloat(det.camt || det.cgst || '0');
+                sgst += parseFloat(det.samt || det.sgst || '0');
+                igst += parseFloat(det.iamt || det.igst || '0');
+                totalTax += parseFloat(det.camt || det.cgst || '0') + parseFloat(det.samt || det.sgst || '0') + parseFloat(det.iamt || det.igst || '0');
+              }
             }
             addRecord(supplierName, supplierGstin, invNum, invDate, invType, val, totalTax, cgst, sgst, igst, inv.itcavl || 'Y');
           }
@@ -84,12 +93,21 @@ export const fileParserService = {
             const val = parseFloat(inv.val || '0');
             let totalTax = 0, cgst = 0, sgst = 0, igst = 0;
             const items = inv.items || [];
-            for (const item of items) {
-              const det = item.item_det || item;
-              cgst += parseFloat(det.camt || '0');
-              sgst += parseFloat(det.samt || '0');
-              igst += parseFloat(det.iamt || '0');
-              totalTax += parseFloat(det.camt || '0') + parseFloat(det.samt || '0') + parseFloat(det.iamt || '0');
+
+            // Extract from root if present
+            cgst = parseFloat(inv.camt || inv.cgst || '0');
+            sgst = parseFloat(inv.samt || inv.sgst || '0');
+            igst = parseFloat(inv.iamt || inv.igst || '0');
+            totalTax = cgst + sgst + igst;
+
+            if (items.length > 0 && totalTax === 0) {
+              for (const item of items) {
+                const det = item.item_det || item;
+                cgst += parseFloat(det.camt || det.cgst || '0');
+                sgst += parseFloat(det.samt || det.sgst || '0');
+                igst += parseFloat(det.iamt || det.igst || '0');
+                totalTax += parseFloat(det.camt || det.cgst || '0') + parseFloat(det.samt || det.sgst || '0') + parseFloat(det.iamt || det.igst || '0');
+              }
             }
             addRecord(supplierName, supplierGstin, invNum, invDate, invType, val, totalTax, cgst, sgst, igst, inv.itcavl || 'Y');
           }
@@ -106,12 +124,21 @@ export const fileParserService = {
             const val = parseFloat(nt.val || '0');
             let totalTax = 0, cgst = 0, sgst = 0, igst = 0;
             const items = nt.items || [];
-            for (const item of items) {
-              const det = item.item_det || item;
-              cgst += parseFloat(det.camt || '0');
-              sgst += parseFloat(det.samt || '0');
-              igst += parseFloat(det.iamt || '0');
-              totalTax += parseFloat(det.camt || '0') + parseFloat(det.samt || '0') + parseFloat(det.iamt || '0');
+            
+            // Extract from root if present
+            cgst = parseFloat(nt.camt || nt.cgst || '0');
+            sgst = parseFloat(nt.samt || nt.sgst || '0');
+            igst = parseFloat(nt.iamt || nt.igst || '0');
+            totalTax = cgst + sgst + igst;
+
+            if (items.length > 0 && totalTax === 0) {
+              for (const item of items) {
+                const det = item.item_det || item;
+                cgst += parseFloat(det.camt || det.cgst || '0');
+                sgst += parseFloat(det.samt || det.sgst || '0');
+                igst += parseFloat(det.iamt || det.igst || '0');
+                totalTax += parseFloat(det.camt || det.cgst || '0') + parseFloat(det.samt || det.sgst || '0') + parseFloat(det.iamt || det.igst || '0');
+              }
             }
             const mult = ntType === 'C' ? -1 : 1;
             addRecord(supplierName, supplierGstin, ntNum, ntDate, ntType, val * mult, totalTax * mult, cgst * mult, sgst * mult, igst * mult, nt.itcavl || 'Y');
@@ -132,6 +159,12 @@ export const fileParserService = {
   },
 
   async parseSapFile(file: File, defaultGstin: string, defaultPeriod: string): Promise<IngestionResult> {
+    const parseNumber = (val: any) => {
+      if (typeof val === 'number') return val;
+      if (!val) return 0;
+      return parseFloat(String(val).replace(/,/g, '')) || 0;
+    };
+
     try {
       const parsedRecords: SapRawRecord[] = [];
 
@@ -161,11 +194,11 @@ export const fileParserService = {
             document_number: String(row.sap_doc_no || row.invoice_num || `51000${idx}`),
             invoice_date: String(docDate),
             document_date: String(docDate),
-            taxable_value: parseFloat(row.taxable_base || row.taxable_value || '0'),
-            total_tax: parseFloat(row.total_tax || '0'),
-            cgst: parseFloat(row.cgst || '0'),
-            sgst: parseFloat(row.sgst || '0'),
-            igst: parseFloat(row.igst || '0'),
+            taxable_value: parseNumber(row.taxable_base || row.taxable_value || '0'),
+            total_tax: parseNumber(row.total_tax || '0'),
+            cgst: parseNumber(row.cgst || '0'),
+            sgst: parseNumber(row.sgst || '0'),
+            igst: parseNumber(row.igst || '0'),
             return_period: defaultPeriod,
           });
         });
@@ -183,11 +216,11 @@ export const fileParserService = {
             document_number: row.document_number || row.invoice_num || `51000${idx}`,
             invoice_date: row.invoice_date || row.doc_date || new Date().toISOString().split('T')[0],
             document_date: row.document_date || row.invoice_date || new Date().toISOString().split('T')[0],
-            taxable_value: parseFloat(row.taxable_value || '0'),
-            total_tax: parseFloat(row.total_tax || '0'),
-            cgst: parseFloat(row.cgst || '0'),
-            sgst: parseFloat(row.sgst || '0'),
-            igst: parseFloat(row.igst || '0'),
+            taxable_value: parseNumber(row.taxable_value || '0'),
+            total_tax: parseNumber(row.total_tax || '0'),
+            cgst: parseNumber(row.cgst || '0'),
+            sgst: parseNumber(row.sgst || '0'),
+            igst: parseNumber(row.igst || '0'),
             return_period: row.return_period || defaultPeriod,
           });
         });
@@ -208,11 +241,11 @@ export const fileParserService = {
               document_number: `51000${idx}`,
               invoice_date: cols[3] || new Date().toISOString().split('T')[0],
               document_date: cols[3] || new Date().toISOString().split('T')[0],
-              taxable_value: parseFloat(cols[4] || '0'),
-              total_tax: parseFloat(cols[5] || '0'),
-              cgst: parseFloat(cols[6] || '0'),
-              sgst: parseFloat(cols[7] || '0'),
-              igst: parseFloat(cols[8] || '0'),
+              taxable_value: parseNumber(cols[4] || '0'),
+              total_tax: parseNumber(cols[5] || '0'),
+              cgst: parseNumber(cols[6] || '0'),
+              sgst: parseNumber(cols[7] || '0'),
+              igst: parseNumber(cols[8] || '0'),
               return_period: defaultPeriod,
             });
           }
