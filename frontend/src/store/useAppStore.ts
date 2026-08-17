@@ -140,7 +140,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       // 1. Try fetching from backend if active
       const resReco = await axios.get(`${API_BASE}/reconcile/results`, {
         params: { gstin: activeGstin, period: returnPeriod },
-        timeout: 1500
+        timeout: 30000
       });
 
       const recoData: RecoRecord[] = Array.isArray(resReco.data) ? resReco.data.map((item: any, idx: number) => ({
@@ -235,7 +235,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       // Try running via FastAPI backend if active
       await axios.post(`${API_BASE}/reconcile/run`, null, {
         params: { gstin: activeGstin, period: returnPeriod },
-        timeout: 1500
+        timeout: 30000
       });
 
       if (progressTimer) clearInterval(progressTimer);

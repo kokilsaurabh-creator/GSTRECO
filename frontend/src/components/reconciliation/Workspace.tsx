@@ -37,7 +37,7 @@ export const Workspace: React.FC = () => {
       return r.doc_type === 'B2BA' || r.invoice_type === 'AMENDMENT' || r.invoice_type === 'A';
     }
     return (
-      (!r.doc_type || r.doc_type === 'B2B') &&
+      (!r.doc_type || r.doc_type === 'B2B' || r.doc_type === 'R') &&
       r.invoice_type !== 'C' &&
       r.invoice_type !== 'D' &&
       r.invoice_type !== 'AMENDMENT' &&

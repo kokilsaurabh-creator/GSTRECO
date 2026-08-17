@@ -85,7 +85,7 @@ export const DataImportView: React.FC = () => {
 
       const endpoint = type === 'gstr2b' ? `${API_BASE}/ingestion/gstr2b-json` : `${API_BASE}/ingestion/sap-mm`;
       const res = await axios.post(endpoint, formData, {
-        timeout: 5000,
+        timeout: 30000,
         onUploadProgress: (progressEvent: any) => {
           if (progressEvent.total) {
             const percent = Math.round((progressEvent.loaded * 60) / progressEvent.total);
