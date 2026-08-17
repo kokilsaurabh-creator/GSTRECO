@@ -135,7 +135,8 @@ export const fileParserService = {
       const parsedRecords: SapRawRecord[] = [];
 
       // Check if XLSX or JSON or CSV text format
-      if (file.name.endsWith('.xlsx') || file.name.endsWith('.xls')) {
+      const fileName = file.name.toLowerCase();
+      if (fileName.endsWith('.xlsx') || fileName.endsWith('.xls')) {
         const arrayBuffer = await file.arrayBuffer();
         const workbook = XLSX.read(arrayBuffer, { type: 'array', cellDates: true });
         const sheetName = workbook.SheetNames[0];
@@ -167,7 +168,7 @@ export const fileParserService = {
             return_period: defaultPeriod,
           });
         });
-      } else if (file.name.endsWith('.json')) {
+      } else if (fileName.endsWith('.json')) {
         const text = await file.text();
         const json = JSON.parse(text);
         const rows = Array.isArray(json) ? json : json.records || [];

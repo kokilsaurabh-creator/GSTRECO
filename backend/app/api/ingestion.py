@@ -173,95 +173,204 @@ async def ingest_gstr2b_multi(
 @router.post("/sap-mm")
 @router.post("/sap-excel")
 @router.post("/ingest/sap-excel")
+@router.post("/ingest/sap-mm")
 async def ingest_sap_excel(
+    active_gstin: Optional[str] = Form(None),
     gstin: Optional[str] = Form(None),
     return_period: Optional[str] = Form(None),
-    file: UploadFile = File(...), 
+    period: Optional[str] = Form(None),
+    file: Optional[UploadFile] = File(None),
+    files: Optional[List[UploadFile]] = File(None),
     db: Session = Depends(get_db)
 ):
     try:
+        import time as _time
+        _t0 = _time.perf_counter()
         print("--- STARTING SAP EXCEL INGESTION ---")
-        content = await file.read()
-        filename = file.filename.lower()
+        uploaded_file = file
+        if not uploaded_file and files and len(files) > 0:
+            uploaded_file = files[0]
+
+        if not uploaded_file:
+            raise HTTPException(status_code=400, detail="No file uploaded for SAP ingestion.")
+
+        fallback_gstin = (active_gstin or gstin or "").strip()
+        req_period = (return_period or period or "June 2026").strip()
+
+        content = await uploaded_file.read()
+        filename = uploaded_file.filename.lower()
         if filename.endswith(".csv"):
             df = pd.read_csv(io.BytesIO(content))
         else:
             try:
-                df = pd.read_excel(io.BytesIO(content), engine='openpyxl')
+                df = pd.read_excel(io.BytesIO(content), engine='calamine')
             except Exception:
-                df = pd.read_excel(io.BytesIO(content))
-
-        print(f"Raw rows read from Excel: {len(df)}")
-        print(f"Excel Columns: {list(df.columns)}")
-
-        # Handle column names flexible mapping
-        if 'vendor_gstin' in df.columns and 'invoice_num' in df.columns:
-            df = df.dropna(subset=['vendor_gstin', 'invoice_num'])
-        elif 'vendor_gstin' in df.columns and 'document_number' in df.columns:
-            df['invoice_num'] = df['document_number']
-            df = df.dropna(subset=['vendor_gstin', 'invoice_num'])
-
-        print(f"Rows after dropping missing GSTIN/Invoice: {len(df)}")
-
-        financial_columns = ['taxable_base', 'taxable_value', 'cgst', 'sgst', 'igst', 'cess']
-        for col in financial_columns:
-            if col in df.columns:
-                df[col] = df[col].astype(str).str.replace(',', '', regex=False)
-                df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0.0)
-            else:
-                df[col] = 0.0
-
-        if 'taxable_base' not in df.columns and 'taxable_value' in df.columns:
-            df['taxable_base'] = df['taxable_value']
-
-        if 'posting_date' in df.columns:
-            df['posting_date'] = pd.to_datetime(df['posting_date'], errors='coerce')
-            df = df.dropna(subset=['posting_date']) 
-            df['return_period_computed'] = df['posting_date'].dt.strftime('%m%Y')
-        elif 'document_date' in df.columns:
-            df['doc_date_dt'] = pd.to_datetime(df['document_date'], errors='coerce')
-            df['return_period_computed'] = df['doc_date_dt'].dt.strftime('%m%Y')
-        else:
-            df['return_period_computed'] = return_period or "062026"
-
-        print(f"Rows surviving date validation: {len(df)}")
-
-        df['total_value'] = df['taxable_base'] + df['cgst'] + df['sgst'] + df['igst'] + df['cess']
-        df['total_tax'] = df['cgst'] + df['sgst'] + df['igst'] + df['cess']
-
-        records_to_insert = []
-        for index, row in df.iterrows():
-            target_own_gstin = str(row.get('own_gstin', gstin or ''))
-            if target_own_gstin:
-                ensure_gst_account_exists(db, target_own_gstin)
-
-            raw_inv_date = row.get('invoice_date', row.get('posting_date', row.get('document_date', None)))
-            doc_date_obj = None
-            if pd.notnull(raw_inv_date):
                 try:
-                    doc_date_obj = pd.to_datetime(raw_inv_date).date()
-                except Exception:
-                    doc_date_obj = None
+                    df = pd.read_excel(io.BytesIO(content), engine='openpyxl')
+                except Exception as e2:
+                    # SAP sometimes exports HTML tables with an .xls extension.
+                    try:
+                        dfs = pd.read_html(io.BytesIO(content))
+                        if dfs:
+                            df = dfs[0]
+                        else:
+                            raise e2
+                    except Exception:
+                        try:
+                            df = pd.read_excel(io.BytesIO(content))
+                        except Exception:
+                            raise e2
 
-            ret_pd = str(row.get('return_period_computed', return_period or '062026'))
+        print(f"Raw rows read from file: {len(df)} ({_time.perf_counter() - _t0:.2f}s)")
+        
+        # 1. Normalize column names (strip, lowercase, replace spaces/dashes with underscores)
+        col_map = {}
+        for c in df.columns:
+            clean_c = str(c).strip().lower().replace(" ", "_").replace("-", "_")
+            col_map[c] = clean_c
+        df = df.rename(columns=col_map)
+        cols = set(df.columns)
+        print(f"Normalized Columns: {list(cols)}")
+
+        # 2. Map Column Aliases
+        # Vendor GSTIN
+        vendor_gstin_col = next((c for c in ['vendor_gstin', 'supplier_gstin', 'ctin', 'vendor_gst', 'supplier_gst', 'gstin_of_supplier'] if c in cols), None)
+        # Document Number / Invoice Num
+        doc_num_col = next((c for c in ['document_number', 'invoice_num', 'invoice_number', 'invoice_no', 'doc_no', 'doc_number', 'sap_doc_no', 'bill_no'] if c in cols), None)
+        # Vendor Name
+        vendor_name_col = next((c for c in ['vendor_name', 'supplier_name', 'name', 'vendor', 'supplier'] if c in cols), None)
+        # Company Code
+        company_code_col = next((c for c in ['company_code', 'co_code', 'cocode', 'bukrs'] if c in cols), None)
+        # Fiscal Year
+        fiscal_year_col = next((c for c in ['fiscal_year', 'fisc_year', 'year', 'gjahr'] if c in cols), None)
+        # Dates
+        date_col = next((c for c in ['posting_date', 'document_date', 'doc_date', 'invoice_date', 'date'] if c in cols), None)
+        # Taxable Value
+        taxable_col = next((c for c in ['taxable_base', 'taxable_value', 'base_amount', 'taxable_amt', 'taxable_val'] if c in cols), None)
+
+        if not vendor_gstin_col or not doc_num_col:
+            # Fall back to positional or search for any column containing 'gstin' and 'inv'/'doc'
+            if not vendor_gstin_col:
+                vendor_gstin_col = next((c for c in cols if 'gstin' in c or 'ctin' in c), None)
+            if not doc_num_col:
+                doc_num_col = next((c for c in cols if 'inv' in c or 'doc' in c or 'number' in c or 'no' in c), None)
+
+        if vendor_gstin_col:
+            df[vendor_gstin_col] = df[vendor_gstin_col].fillna("")
+        if doc_num_col:
+            df = df.dropna(subset=[doc_num_col])
+
+        # Clean Financial Columns
+        for fcol in ['taxable_base', 'taxable_value', 'cgst', 'sgst', 'igst', 'cess']:
+            matched_c = next((c for c in cols if fcol in c), None)
+            if matched_c:
+                df[matched_c] = df[matched_c].astype(str).str.replace(',', '', regex=False)
+                df[fcol] = pd.to_numeric(df[matched_c], errors='coerce').fillna(0.0)
+            elif fcol == 'taxable_base' and taxable_col:
+                df[taxable_col] = df[taxable_col].astype(str).str.replace(',', '', regex=False)
+                df['taxable_base'] = pd.to_numeric(df[taxable_col], errors='coerce').fillna(0.0)
+            else:
+                df[fcol] = 0.0
+
+        # Compute return period & dates
+        if date_col:
+            df['date_parsed'] = pd.to_datetime(df[date_col], errors='coerce')
+            df['computed_period'] = df['date_parsed'].dt.strftime('%m%Y')
+        else:
+            df['date_parsed'] = None
+            df['computed_period'] = None
+
+        from .reconciliation import normalize_period
+        default_norm_period = normalize_period(req_period) or "062026"
+
+        # FIX 1: Pre-collect unique GSTINs and batch-check ONCE (was per-row before)
+        unique_gstins = set()
+        own_gstin_col_name = 'own_gstin' if 'own_gstin' in cols else None
+        if own_gstin_col_name:
+            for val in df[own_gstin_col_name].dropna().unique():
+                cleaned = str(val).strip().upper()
+                if cleaned and cleaned.lower() != "nan":
+                    unique_gstins.add(cleaned)
+        if fallback_gstin:
+            unique_gstins.add(fallback_gstin.upper())
+        if not unique_gstins:
+            unique_gstins.add("26AAACW1018K1ZH")
+
+        for g in unique_gstins:
+            ensure_gst_account_exists(db, g)
+        print(f"Batch-checked {len(unique_gstins)} unique GSTIN(s) ({_time.perf_counter() - _t0:.2f}s)")
+
+        # FIX 3: Use to_dict('records') for safer dictionary access
+        records_to_insert = []
+        for row in df.to_dict(orient='records'):
+            # Check own_gstin cleanly
+            raw_own = row.get('own_gstin')
+            if raw_own is not None and pd.notnull(raw_own) and str(raw_own).strip() != "" and str(raw_own).strip().lower() != "nan":
+                rec_own_gstin = str(raw_own).strip().upper()
+            else:
+                rec_own_gstin = fallback_gstin or "26AAACW1018K1ZH"
+
+            # Date object
+            parsed_d = row.get('date_parsed')
+            doc_date_obj = parsed_d.date() if parsed_d is not None and pd.notnull(parsed_d) and hasattr(parsed_d, 'date') else None
+
+            # Computed return period
+            computed_p = row.get('computed_period')
+            rec_period = str(computed_p) if computed_p is not None and pd.notnull(computed_p) and str(computed_p).strip() != "" else default_norm_period
+
+            v_gstin = str(row.get(vendor_gstin_col)).strip().upper() if vendor_gstin_col and pd.notnull(row.get(vendor_gstin_col)) else ""
+            v_name = str(row.get(vendor_name_col)).strip() if vendor_name_col and pd.notnull(row.get(vendor_name_col)) else ""
+            doc_no = str(row.get(doc_num_col)).strip() if doc_num_col and pd.notnull(row.get(doc_num_col)) else ""
+            c_code = str(row.get(company_code_col)).strip() if company_code_col and pd.notnull(row.get(company_code_col)) else ""
+            f_year = str(row.get(fiscal_year_col)).strip() if fiscal_year_col and pd.notnull(row.get(fiscal_year_col)) else ""
+
+            # Ensure numeric conversions safely
+            try:
+                t_val = float(row.get('taxable_base', 0.0))
+            except (ValueError, TypeError):
+                t_val = 0.0
+            try:
+                cgst_v = float(row.get('cgst', 0.0))
+            except (ValueError, TypeError):
+                cgst_v = 0.0
+            try:
+                sgst_v = float(row.get('sgst', 0.0))
+            except (ValueError, TypeError):
+                sgst_v = 0.0
+            try:
+                igst_v = float(row.get('igst', 0.0))
+            except (ValueError, TypeError):
+                igst_v = 0.0
+            try:
+                cess_v = float(row.get('cess', 0.0))
+            except (ValueError, TypeError):
+                cess_v = 0.0
+            tot_val = t_val + cgst_v + sgst_v + igst_v + cess_v
+
+            sap_doc_val = row.get('sap_doc_no')
+            sap_doc_str = str(sap_doc_val) if pd.notnull(sap_doc_val) else ""
 
             record = {
                 "id": uuid.uuid4(),
-                "gstin": target_own_gstin,
-                "vendor_gstin": str(row.get('vendor_gstin', '')),
-                "vendor_name": str(row.get('vendor_name', '')),
-                "sap_doc_no": str(row.get('sap_doc_no', '')),
-                "document_number": str(row.get('invoice_num', row.get('document_number', ''))),
+                "gstin": rec_own_gstin,
+                "vendor_gstin": v_gstin,
+                "vendor_name": v_name,
+                "company_code": c_code,
+                "sap_doc_no": sap_doc_str,
+                "fiscal_year": f_year,
+                "document_number": doc_no,
                 "document_date": doc_date_obj,
-                "taxable_value": float(row['taxable_base']),
-                "cgst": float(row['cgst']),
-                "sgst": float(row['sgst']),
-                "igst": float(row['igst']),
-                "cess": float(row['cess']),
-                "total_value": float(row['total_value']),
-                "return_period": ret_pd
+                "taxable_value": t_val,
+                "cgst": cgst_v,
+                "sgst": sgst_v,
+                "igst": igst_v,
+                "cess": cess_v,
+                "total_value": tot_val,
+                "return_period": rec_period
             }
             records_to_insert.append(record)
+
+        print(f"Built {len(records_to_insert)} records ({_time.perf_counter() - _t0:.2f}s)")
 
         BATCH_SIZE = 500
         for i in range(0, len(records_to_insert), BATCH_SIZE):
@@ -269,19 +378,26 @@ async def ingest_sap_excel(
             db.bulk_insert_mappings(SAPPurchaseRegister, batch)
         db.commit()
 
-        print(f"--- INGESTION SUCCESS: {len(records_to_insert)} SAP records inserted ---")
+        elapsed = _time.perf_counter() - _t0
+        print(f"--- INGESTION SUCCESS: {len(records_to_insert)} SAP records inserted in {elapsed:.2f}s ---")
 
         return {
-            "status": "success", 
-            "inserted": len(records_to_insert), 
+            "status": "success",
+            "message": f"Successfully ingested {len(records_to_insert)} SAP MM purchase records!",
+            "inserted": len(records_to_insert),
             "failed": 0,
-            "count": len(records_to_insert)
+            "count": len(records_to_insert),
+            "total_records_parsed": len(records_to_insert),
+            "files_processed": 1
         }
 
-
+    except HTTPException as he:
+        db.rollback()
+        raise he
     except Exception as e:
         print(f"FATAL INGESTION ERROR: {str(e)}")
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Error processing SAP Excel: {str(e)}")
+
 
 
